@@ -2,6 +2,7 @@ import os
 import sys
 import time
 
+import matplotlib.pyplot as plt
 import numpy as np
 from keras import losses
 from keras.callbacks import Callback, TensorBoard
@@ -9,7 +10,6 @@ from keras.layers import Flatten, Dense, \
     Input, Activation, Conv1D, Add, Multiply
 from keras.models import Model, load_model
 from scipy.io.wavfile import read, write
-import matplotlib.pyplot as plt
 
 
 def wavenetBlock(n_filters, filter_size, dilation_rate):
@@ -135,7 +135,7 @@ x = np.linspace(0, 4 * np.pi, train_sequence_length)
 
 
 def audio_main():
-    train_sequence = np.sin(5*x)
+    train_sequence = np.sin(5 * x)
     # train_sequence = train_sequence + np.random.normal(0, 0.1, train_sequence.shape)
     valid_sequence = train_sequence[5 * frame_size:]
 
@@ -170,7 +170,7 @@ def audio_main():
 
 def test_model():
     model = load_model('models/Wavenet_NrLayers:4_Epochs:50_BatchSize:64_4pi.h5')
-    train_sequence = np.sin(5*x)
+    train_sequence = np.sin(5 * x)
 
     nr_predictions = 64
     # starting_point = np.random.choice(range(train_sequence_length - frame_size))
