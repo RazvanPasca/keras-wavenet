@@ -1,15 +1,11 @@
-import os
-import sys
-import time
-
 import matplotlib.pyplot as plt
 import numpy as np
-from keras import losses
-from keras.callbacks import Callback, TensorBoard
+from keras import losses, metrics, optimizers
+from keras.callbacks import TensorBoard
 from keras.layers import Flatten, Dense, \
     Input, Activation, Conv1D, Add, Multiply
 from keras.models import Model, load_model
-from scipy.io.wavfile import read, write
+from scipy.io.wavfile import read
 
 
 def wavenetBlock(n_filters, filter_size, dilation_rate):
@@ -24,31 +20,32 @@ def wavenetBlock(n_filters, filter_size, dilation_rate):
                              padding='same',
                              activation='sigmoid')(input_)
         merged = Multiply()([tanh_out, sigmoid_out])
-        skip_out = Conv1D(1, 1, activation='relu', padding='same')(merged)
-        out = Add(name="Block_{}_out".format(dilation_rate))([skip_out, residual])
+        skip_out = Conv1D(n_filters, 1, activation='relu', padding='same')(merged)
+        out = Conv1D(n_filters, 1, activation='relu', padding='same')(merged)
+        out = Add(name="Block_{}_Out".format(dilation_rate))([out, residual])
         return out, skip_out
 
     return f
 
 
-def get_basic_generative_model(input_size, nr_layers):
+def get_basic_generative_model(nr_filters, input_size, nr_layers, lr):
     input_ = Input(shape=(input_size, 1))
-    A, B = wavenetBlock(64, 2, 1)(input_)
+    A, B = wavenetBlock(nr_filters, 2, 1)(input_)
+    # A = Conv1D(nr_filters, 2, dilation_rate=1, padding='same')(input_)
     skip_connections = [B]
     for i in range(1, nr_layers + 1):
         dilation_rate = 2 ** i
-        print(dilation_rate)
-        A, B = wavenetBlock(64, 2, dilation_rate)(A)
+        A, B = wavenetBlock(nr_filters, 2, dilation_rate)(A)
         skip_connections.append(B)
     net = Add()(skip_connections)
     net = Activation('relu')(net)
     net = Conv1D(1, 1, activation='relu')(net)
     net = Conv1D(1, 1)(net)
     net = Flatten()(net)
-    net = Dense(256, activation='relu', name="Model_Output")(net)
-    net = Dense(1)(net)
+    net = Dense(1, name="Model_Output")(net)
     model = Model(input=input_, output=net)
-    model.compile(loss=losses.mean_squared_error, optimizer='adam')
+    optimizer = optimizers.adam(lr=lr, clipvalue=5.)
+    model.compile(loss=losses.mean_squared_error, optimizer=optimizer, metrics=[metrics.mean_absolute_error])
     model.summary()
     return model
 
@@ -62,13 +59,13 @@ def get_audio(filename):
     return sr, audio
 
 
-def frame_generator(audio, frame_size, batch_size):
+def frame_generator(audio, frame_size, frame_shift, batch_size):
     # TODO pick batches randomly such that we don't overfitt growing
     audio_len = len(audio)
     X = []
     y = []
     while 1:
-        for i in range(0, audio_len - frame_size - 1, batch_size):
+        for i in range(0, audio_len - frame_size - 1, frame_shift):
             frame = audio[i:i + frame_size]
             if len(frame) < frame_size:
                 break
@@ -83,50 +80,19 @@ def frame_generator(audio, frame_size, batch_size):
                 y = []
 
 
-def get_audio_from_model(model, sr, duration, seed_audio):
-    print('Generating audio...')
-    new_audio = np.zeros((sr * duration))
-    curr_sample_idx = 0
-    while curr_sample_idx < new_audio.shape[0]:
-        distribution = np.array(model.predict(seed_audio.reshape(1,
-                                                                 frame_size, 1)
-                                              ), dtype=float).reshape(256)
-        distribution /= distribution.sum().astype(float)
-        predicted_val = np.random.choice(range(256), p=distribution)
-        ampl_val_8 = ((((predicted_val) / 255.0) - 0.5) * 2.0)
-        ampl_val_16 = (np.sign(ampl_val_8) * (1 / 256.0) * ((1 + 256.0) ** abs(
-            ampl_val_8) - 1)) * 2 ** 15
-        new_audio[curr_sample_idx] = ampl_val_16
-        seed_audio[:-1] = seed_audio[1:]
-        seed_audio[-1] = ampl_val_16
-        pc_str = str(round(100 * curr_sample_idx / float(new_audio.shape[0]), 2))
-        sys.stdout.write('Percent complete: ' + pc_str + '\r')
-        sys.stdout.flush()
-        curr_sample_idx += 1
-    print('Audio generated.')
-    return new_audio.astype(np.int16)
-
-
-class SaveAudioCallback(Callback):
-    def __init__(self, ckpt_freq, sr, seed_audio):
-        super(SaveAudioCallback, self).__init__()
-        self.ckpt_freq = ckpt_freq
-        self.sr = sr
-        self.seed_audio = seed_audio
-
-    def on_epoch_end(self, epoch, logs={}):
-        if (epoch + 1) % self.ckpt_freq == 0:
-            ts = str(int(time.time()))
-            filepath = os.path.join('output/', 'ckpt_' + ts + '.wav')
-            audio = get_audio_from_model(self.model, self.sr, 0.5, self.seed_audio)
-            write(filepath, self.sr, audio)
-
-
 n_epochs = 50
-batch_size = 64
-nr_layers = 4
+batch_size = 32
+nr_layers = 8
 frame_size = 2 ** (nr_layers + 1)
+nr_filters = 32
+frame_shift = 4
+lr = 0.0003
 print("Frame size is {}".format(frame_size))
+name = "Wavenet_Layers:{}_Epochs:{}_Lr:{}_BS:{}_FShift:{}_TA_clip".format(nr_layers,
+                                                                          n_epochs,
+                                                                          lr,
+                                                                          batch_size,
+                                                                          frame_shift)
 
 valid_sequence_length = 1024
 train_sequence_length = 4096
@@ -134,29 +100,21 @@ train_sequence_length = 4096
 x = np.linspace(0, 4 * np.pi, train_sequence_length)
 
 
-def audio_main():
-    train_sequence = np.sin(5 * x)
+def train_model():
+    train_sequence = np.sin(x)
     # train_sequence = train_sequence + np.random.normal(0, 0.1, train_sequence.shape)
-    valid_sequence = train_sequence[5 * frame_size:]
+    valid_sequence = train_sequence[frame_size // 2:]
 
     nr_train_steps = (train_sequence_length - frame_size - 1) // batch_size
-    nr_val_steps = (valid_sequence.shape[0] - frame_size - 1) // batch_size
+    nr_val_steps = (valid_sequence.shape[0] - frame_size - 1) // batch_size // 2
 
-    plt.figure()
-    plt.title("Train sequence and valid sequence")
-    plt.plot(train_sequence, label="Train")
-    plt.plot(valid_sequence, label="Valid")
-    plt.legend()
-    plt.show()
-
-    model = get_basic_generative_model(frame_size, nr_layers)
+    model = get_basic_generative_model(nr_filters, frame_size, nr_layers, lr=lr)
     print('Total training steps:', nr_train_steps)
     print('Total validation steps:', nr_val_steps)
 
-    name = "Wavenet_NrLayers:{}_Epochs:{}_BatchSize:{}_4pi".format(nr_layers, n_epochs, batch_size)
-
-    validation_data_gen = frame_generator(train_sequence, frame_size, batch_size)
-    training_data_gen = frame_generator(valid_sequence, frame_size, batch_size)
+    training_data_gen = frame_generator(train_sequence, frame_size, frame_shift,
+                                        batch_size)
+    validation_data_gen = frame_generator(valid_sequence, frame_size, frame_shift, batch_size)
     tensor_board_callback = TensorBoard(log_dir='tmp/' + name, write_graph=True)
 
     model.fit_generator(training_data_gen, steps_per_epoch=nr_train_steps, epochs=n_epochs,
@@ -169,10 +127,13 @@ def audio_main():
 
 
 def test_model():
-    model = load_model('models/Wavenet_NrLayers:4_Epochs:50_BatchSize:64_4pi.h5')
-    train_sequence = np.sin(5 * x)
+    path = 'models/' + name + '.h5'
+    # path = 'models/' + 'Wavenet_Layers:7_Epochs:50_Lr:0.0003_BS:32_FShift:4_TA_clip' + '.h5'
+    model = load_model(
+        path)
+    train_sequence = np.sin(x)
 
-    nr_predictions = 64
+    nr_predictions = 3000
     # starting_point = np.random.choice(range(train_sequence_length - frame_size))
     predictions = np.zeros(nr_predictions)
     starting_point = 0
@@ -184,7 +145,7 @@ def test_model():
         position += 1
 
     plt.figure()
-    plt.title("Original sequence and predicted sequence")
+    plt.title(path[7:-3])
     plt.plot(train_sequence, label="Train")
     plt.plot(range(starting_point, starting_point + nr_predictions), predictions, label="Predicted")
     plt.legend()
@@ -192,5 +153,5 @@ def test_model():
 
 
 if __name__ == '__main__':
-    audio_main()
-    # test_model()
+    train_model()
+    test_model()
