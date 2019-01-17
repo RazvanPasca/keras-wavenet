@@ -1,11 +1,42 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from keras import losses, metrics, optimizers
+from keras import losses, metrics, optimizers, callbacks
 from keras.callbacks import TensorBoard
 from keras.layers import Flatten, Dense, \
     Input, Activation, Conv1D, Add, Multiply
 from keras.models import Model, load_model
 from scipy.io.wavfile import read
+
+
+class PlotCallback(callbacks.Callback):
+    def __init__(self, model_name):
+        self.model_name = model_name
+
+    def on_train_begin(self, logs={}):
+        return
+
+    def on_epoch_end(self, epoch, logs={}):
+        train_sequence = np.sin(x)
+
+        nr_predictions = 3000
+        # starting_point = np.random.choice(range(train_sequence_length - frame_size))
+        predictions = np.zeros(nr_predictions)
+        starting_point = 0
+        position = 0
+        for step in range(starting_point, starting_point + nr_predictions):
+            input = np.reshape(x[step:step + frame_size], (-1, frame_size, 1))
+            predicted = self.model.predict(input)
+            predictions[position] = predicted
+            position += 1
+
+        plt.figure()
+        plt.title(self.model_name)
+        plt.plot(train_sequence, label="Train")
+        plt.plot(range(starting_point, starting_point + nr_predictions), predictions, label="Predicted")
+        plt.legend()
+        plt.show()
+        plt.savefig(self.model_name + str(epoch) + ".png")
+        return
 
 
 def wavenetBlock(n_filters, filter_size, dilation_rate):
@@ -92,7 +123,7 @@ name = "Wavenet_Layers:{}_Epochs:{}_Lr:{}_BS:{}_FShift:{}_TA_clip".format(nr_lay
                                                                           n_epochs,
                                                                           lr,
                                                                           batch_size,
-                                                                          frame_shift)
+                                                                          frame_shift).replace(":", "-")
 
 valid_sequence_length = 1024
 train_sequence_length = 4096
@@ -116,10 +147,11 @@ def train_model():
                                         batch_size)
     validation_data_gen = frame_generator(valid_sequence, frame_size, frame_shift, batch_size)
     tensor_board_callback = TensorBoard(log_dir='tmp/' + name, write_graph=True)
+    plot_figure_callback = PlotCallback(name)
 
     model.fit_generator(training_data_gen, steps_per_epoch=nr_train_steps, epochs=n_epochs,
                         validation_data=validation_data_gen, validation_steps=nr_val_steps, verbose=2,
-                        callbacks=[tensor_board_callback])
+                        callbacks=[tensor_board_callback, plot_figure_callback])
 
     print('Saving model...')
     model.save('models/' + name + '.h5')
