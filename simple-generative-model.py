@@ -86,11 +86,16 @@ def wavenetBlock(n_filters, filter_size, dilation_rate):
     return f
 
 
-def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss):
+def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clip):
     if loss is "MSE":
         model_loss = losses.MSE
     else:
         model_loss = losses.MAE
+
+    if clip is True:
+        clipvalue = .5
+    else:
+        clipvalue = None
 
     input_ = Input(shape=(input_size, 1))
     A, B = wavenetBlock(nr_filters, 2, 1)(input_)
@@ -107,40 +112,55 @@ def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss):
     net = Flatten()(net)
     net = Dense(1, name="Model_Output")(net)
     model = Model(input=input_, output=net)
-    optimizer = optimizers.adam(lr=lr, clipvalue=1.)
+    optimizer = optimizers.adam(lr=lr, clipvalue=clipvalue)
     model.compile(loss=model_loss, optimizer=optimizer)
     model.summary()
     return model
 
 
-def frame_generator(target_series, frame_size, frame_shift, batch_size):
-    # TODO pick batches randomly such that we don't overfit growing phase
+def frame_generator(target_series, frame_size, frame_shift, batch_size, random):
     series_len = len(target_series)
     X = []
     y = []
-    while 1:
-        batch_start = np.random.choice(range(0, series_len - frame_shift * batch_size - frame_size - 1))
-        for i in range(batch_start, batch_start + frame_shift * batch_size, frame_shift):
-            frame = target_series[i:i + frame_size]
-            temp = target_series[i + frame_size]
-            X.append(frame.reshape(frame_size, 1))
-            y.append(temp)
-            if len(X) == batch_size:
+    if random:
+        while 1:
+            batch_start = np.random.choice(range(0, series_len - batch_size - frame_size - 1))
+            for i in range(batch_start, batch_start + batch_size):
+                frame = target_series[i:i + frame_size]
+                temp = target_series[i + frame_size]
+                X.append(frame.reshape(frame_size, 1))
+                y.append(temp)
+                if len(X) == batch_size:
+                    yield np.array(X), np.array(y)
+                    X = []
+                    y = []
+    else:
+        while 1:
+            for i in range(0, series_len - batch_size - frame_size - 1, frame_shift):
+                for j in range(batch_size):
+                    frame = target_series[i + j:i + j + frame_size]
+                    temp = target_series[i + j + frame_size]
+                    X.append(frame.reshape(frame_size, 1))
+                    y.append(temp)
                 yield np.array(X), np.array(y)
                 X = []
                 y = []
 
 
-def train_model(nr_train_steps, nr_val_steps, save_path):
+def get_frame_generators(train_sequence, valid_sequence, frame_size, frame_shift, batch_size, random):
+    training_data_gen = frame_generator(train_sequence, frame_size, frame_shift, batch_size, random)
+    validation_data_gen = frame_generator(valid_sequence, frame_size, frame_shift, batch_size, random=False)
+    return training_data_gen, validation_data_gen
+
+
+def train_model(nr_train_steps, nr_val_steps, clip, random, save_path):
     valid_sequence = train_sequence
-    model = get_basic_generative_model(nr_filters, frame_size, nr_layers, lr=lr, loss=loss)
+    model = get_basic_generative_model(nr_filters, frame_size, nr_layers, lr=lr, loss=loss, clip=clip)
 
     print('Total training steps:', nr_train_steps)
     print('Total validation steps:', nr_val_steps)
-
-    training_data_gen = frame_generator(train_sequence, frame_size, frame_shift,
-                                        batch_size)
-    validation_data_gen = frame_generator(valid_sequence, frame_size, frame_shift, batch_size)
+    training_data_gen, validation_data_gen = get_frame_generators(train_sequence, valid_sequence, frame_size,
+                                                                  frame_shift, batch_size, random)
 
     tensor_board_callback = TensorBoard(log_dir=save_path, write_graph=True)
     plot_figure_callback = PlotCallback(model_name, save_path)
@@ -162,22 +182,26 @@ def test_model():
 
 n_epochs = 10
 batch_size = 1
-nr_layers = 8
+nr_layers = 6
 frame_size = 2 ** nr_layers
-nr_filters = 32
-frame_shift = 1
+nr_filters = 96
+frame_shift = 8
 lr = 0.0001
 loss = 'MSE'
+clip = True
+random = False
 
 print("Frame size is {}".format(frame_size))
-model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_FS:{}_{}_clip".format(nr_layers,
-                                                                   n_epochs,
-                                                                   lr,
-                                                                   batch_size,
-                                                                   frame_shift, loss)
+model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}".format(nr_layers,
+                                                                                        n_epochs,
+                                                                                        lr,
+                                                                                        batch_size, nr_filters,
+                                                                                        frame_shift, loss, clip, random)
 
-valid_sequence_length = 512
+valid_sequence_length = 2048
 train_sequence_length = 2048
+nr_train_steps = train_sequence_length // batch_size
+nr_val_steps = valid_sequence_length // batch_size
 
 x = np.linspace(0 - np.pi / 4, 2 * np.pi, train_sequence_length)
 train_sequence = np.sin(x)
@@ -187,9 +211,6 @@ path = 'models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
 if not os.path.exists(path):
     os.makedirs(path)
 
-nr_train_steps = 1000
-nr_val_steps = 100
-
 if __name__ == '__main__':
-    train_model(nr_train_steps, nr_val_steps, path)
+    train_model(nr_train_steps, nr_val_steps, clip, random, path)
     test_model()
