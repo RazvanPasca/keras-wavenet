@@ -70,11 +70,11 @@ def wavenetBlock(n_filters, filter_size, dilation_rate):
         residual = input_
         tanh_out = Conv1D(n_filters, filter_size,
                           dilation_rate=dilation_rate,
-                          padding='same',
+                          padding='causal',
                           activation='tanh')(input_)
         sigmoid_out = Conv1D(n_filters, filter_size,
                              dilation_rate=dilation_rate,
-                             padding='same',
+                             padding='causal',
                              activation='sigmoid')(input_)
 
         merged = Multiply()([tanh_out, sigmoid_out])
