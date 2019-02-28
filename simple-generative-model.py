@@ -32,7 +32,7 @@ class PlotCallback(callbacks.Callback):
             position = 0
 
             for step in range(starting_point, starting_point + nr_predictions):
-                input = np.reshape(x[step:step + frame_size], (-1, frame_size, 1))
+                input = np.reshape(train_sequence[step:step + frame_size], (-1, frame_size, 1))
                 predicted = self.model.predict(input)
                 predictions[position] = predicted
                 position += 1
@@ -125,16 +125,15 @@ def frame_generator(target_series, frame_size, frame_shift, batch_size, random):
     y = []
     if random:
         while 1:
-            batch_start = np.random.choice(range(0, series_len - batch_size - frame_size - 1))
-            for i in range(batch_start, batch_start + batch_size):
-                frame = target_series[i:i + frame_size]
-                temp = target_series[i + frame_size]
-                X.append(frame.reshape(frame_size, 1))
-                y.append(temp)
-                if len(X) == batch_size:
-                    yield np.array(X), np.array(y)
-                    X = []
-                    y = []
+            batch_start = np.random.choice(range(0, series_len - frame_size - 1))
+            frame = target_series[batch_start:batch_start + frame_size]
+            temp = target_series[batch_start + frame_size]
+            X.append(frame.reshape(frame_size, 1))
+            y.append(temp)
+            if len(X) == batch_size:
+                yield np.array(X), np.array(y)
+                X = []
+                y = []
     else:
         while 1:
             for i in range(0, series_len - batch_size - frame_size - 1, frame_shift):
@@ -190,7 +189,7 @@ frame_shift = 8
 lr = 0.0001
 loss = 'MSE'
 clip = True
-random = False
+random = True
 
 print("Frame size is {}".format(frame_size))
 model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}".format(nr_layers,
