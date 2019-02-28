@@ -11,11 +11,12 @@ from keras.models import Model, load_model
 
 
 class PlotCallback(callbacks.Callback):
-    def __init__(self, model_name, save_path):
+    def __init__(self, model_name, nr_epochs, save_path):
         super().__init__()
         self.model_name = model_name
         self.epoch = 0
         self.save_path = save_path
+        self.nr_epochs = nr_epochs
 
     def on_train_begin(self, logs={}):
         return
@@ -24,7 +25,7 @@ class PlotCallback(callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs={}):
         self.epoch += 1
-        if self.epoch % 10 == 0 or self.epoch == 1:
+        if self.epoch % 2 == 0 or self.epoch == 1 or self.epoch == self.nr_epochs:
             starting_point = 0
             nr_predictions = min(3000, train_sequence_length - starting_point - frame_size - 1)
             predictions = np.zeros(nr_predictions)
@@ -163,7 +164,7 @@ def train_model(nr_train_steps, nr_val_steps, clip, random, save_path):
                                                                   frame_shift, batch_size, random)
 
     tensor_board_callback = TensorBoard(log_dir=save_path, write_graph=True)
-    plot_figure_callback = PlotCallback(model_name, save_path)
+    plot_figure_callback = PlotCallback(model_name, n_epochs, save_path)
 
     model.fit_generator(training_data_gen, steps_per_epoch=nr_train_steps, epochs=n_epochs,
                         validation_data=validation_data_gen, validation_steps=nr_val_steps, verbose=2,
@@ -184,7 +185,7 @@ n_epochs = 10
 batch_size = 1
 nr_layers = 6
 frame_size = 2 ** nr_layers
-nr_filters = 96
+nr_filters = 32
 frame_shift = 8
 lr = 0.0001
 loss = 'MSE'
@@ -203,7 +204,7 @@ train_sequence_length = 2048
 nr_train_steps = train_sequence_length // batch_size
 nr_val_steps = valid_sequence_length // batch_size
 
-x = np.linspace(0 - np.pi / 4, 2 * np.pi, train_sequence_length)
+x = np.linspace(0 - np.pi / 2, 2 * np.pi + np.pi / 2, train_sequence_length)
 train_sequence = np.sin(x)
 now = datetime.datetime.now()
 path = 'models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
