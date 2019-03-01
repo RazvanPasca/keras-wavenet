@@ -1,14 +1,16 @@
 import datetime
 import os
+from textwrap import wrap
 
 import matplotlib.pyplot as plt
 import numpy as np
-from Wavenet import ParseLfpBinaries
 from keras import losses, optimizers, callbacks
 from keras.callbacks import TensorBoard
 from keras.layers import Flatten, Dense, \
     Input, Activation, Conv1D, Add, Multiply
 from keras.models import Model, load_model
+
+import ParseLfpBinaries
 
 
 class PlotCallback(callbacks.Callback):
@@ -18,6 +20,8 @@ class PlotCallback(callbacks.Callback):
         self.epoch = 0
         self.save_path = save_path
         self.nr_epochs = nr_epochs
+        self.nr_prediction_steps = 1000
+        self.frame_size = 256
 
     def on_train_begin(self, logs={}):
         return
@@ -27,26 +31,37 @@ class PlotCallback(callbacks.Callback):
     def on_epoch_end(self, epoch, logs={}):
         self.epoch += 1
         if self.epoch % 2 == 0 or self.epoch == 1 or self.epoch == self.nr_epochs:
-            plot_predictions(self.model, self.epoch, self.save_path)
+            # starting_point = np.random.randint(0, train_sequence_length - self.nr_prediction_steps - self.frame_size)
+
+            plot_predictions(self.model, self.epoch, self.save_path, nr_steps=self.nr_prediction_steps,
+                             starting_point=0)
         return
 
 
-def plot_predictions(model, epoch, save_path):
-    starting_point = 0
-    nr_predictions = min(3000, train_sequence_length - starting_point - frame_size - 1)
+def plot_predictions(model, epoch, save_path, nr_steps=10000, starting_point=0, teacher_forcing=True):
+    nr_predictions = min(nr_steps, train_sequence_length - starting_point - frame_size - 1)
     predictions = np.zeros(nr_predictions)
     position = 0
 
-    for step in range(starting_point, starting_point + nr_predictions):
-        input = np.reshape(train_sequence[step:step + frame_size], (-1, frame_size, 1))
-        predicted = model.predict(input)
-        predictions[position] = predicted
-        position += 1
-    plt.figure()
-    plt.title(model_name)
-    plt.plot(train_sequence[:nr_predictions + frame_size], label="Train")
+    if teacher_forcing:
+        for step in range(starting_point, starting_point + nr_predictions):
+            input_sequence = np.reshape(train_sequence[step:step + frame_size], (-1, frame_size, 1))
+            predicted = model.predict(input_sequence)
+            predictions[position] = predicted
+            position += 1
+    else:
+        input_sequence = np.reshape(train_sequence[:frame_size], (-1, frame_size, 1))
+        for step in range(starting_point, starting_point + nr_predictions):
+            predicted = model.predict(input_sequence)
+            predictions[position] = predicted
+            input_sequence = np.append(input_sequence, np.reshape(predicted, (-1, 1, 1)), axis=1)
+            position += 1
+
+    plt.figure(figsize=(9, 6))
+    plt.title("\n".join(wrap(model_name + '_TeacherF:' + str(teacher_forcing), 33)))
+    plt.plot(train_sequence[:nr_predictions + frame_size], label="Original sequence")
     plt.plot(range(starting_point + frame_size, starting_point + nr_predictions + frame_size), predictions,
-             label="Predicted")
+             label="Predicted sequence")
     plt.legend()
     plt.savefig(save_path + '/' + str(epoch) + ".png")
     plt.show()
@@ -83,7 +98,7 @@ def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clip
     if clip is True:
         clipvalue = .5
     else:
-        clipvalue = None
+        clipvalue = 20
 
     input_ = Input(shape=(input_size, 1))
     A, B = wavenet_block(nr_filters, 2, 1)(input_)
@@ -164,11 +179,13 @@ def train_model(nr_train_steps, nr_val_steps, clip, random, save_path):
 def test_model(save_path):
     model = load_model(
         save_path + '.h5')
-    plot_predictions(model, "After_training", save_path)
+    model.summary()
+    plot_predictions(model, "After_training", save_path, teacher_forcing=False)
+    plot_predictions(model, "After_training_TF", save_path, teacher_forcing=True)
 
 
 n_epochs = 10
-batch_size = 64
+batch_size = 32
 nr_layers = 6
 frame_size = 2 ** nr_layers
 nr_filters = 32
@@ -183,7 +200,8 @@ model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}"
                                                                                         n_epochs,
                                                                                         lr,
                                                                                         batch_size, nr_filters,
-                                                                                        frame_shift, loss, clip, random)
+                                                                                        frame_shift, loss, clip,
+                                                                                        random)
 
 movies = ParseLfpBinaries.ParseLfps("/home/pasca/School/Licenta/Datasets/CER01A50/Bin_cer01a50-LFP.json")
 
