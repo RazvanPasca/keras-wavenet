@@ -8,6 +8,7 @@ from keras.callbacks import TensorBoard
 from keras.layers import Flatten, Dense, \
     Input, Activation, Conv1D, Add, Multiply
 from keras.models import Model, load_model
+import ParseLfpBinaries
 
 
 class PlotCallback(callbacks.Callback):
@@ -38,7 +39,7 @@ class PlotCallback(callbacks.Callback):
                 position += 1
             plt.figure()
             plt.title(model_name)
-            plt.plot(train_sequence, label="Train")
+            plt.plot(train_sequence[:nr_predictions+frame_size], label="Train")
             plt.plot(range(starting_point + frame_size, starting_point + nr_predictions + frame_size), predictions,
                      label="Predicted")
             plt.legend()
@@ -52,13 +53,13 @@ def plot_predictions(model, save=False):
     predictions = np.zeros(nr_predictions)
     position = 0
     for step in range(starting_point, starting_point + nr_predictions):
-        input = np.reshape(x[step:step + frame_size], (-1, frame_size, 1))
+        input = np.reshape(train_sequence[step:step + frame_size], (-1, frame_size, 1))
         predicted = model.predict(input)
         predictions[position] = predicted
         position += 1
     plt.figure()
     plt.title(model_name)
-    plt.plot(train_sequence, label="Train")
+    plt.plot(train_sequence[nr_predictions], label="Train")
     plt.plot(range(starting_point + frame_size, starting_point + nr_predictions + frame_size), predictions,
              label="Predicted")
     plt.legend()
@@ -181,7 +182,7 @@ def test_model():
 
 
 n_epochs = 10
-batch_size = 1
+batch_size = 32
 nr_layers = 6
 frame_size = 2 ** nr_layers
 nr_filters = 32
@@ -198,13 +199,14 @@ model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}"
                                                                                         batch_size, nr_filters,
                                                                                         frame_shift, loss, clip, random)
 
-valid_sequence_length = 2048
-train_sequence_length = 2048
+movies = ParseLfpBinaries.ParseLfps("/home/gabir/DATASETS/CER01A50/Bin_cer01a50-LFP.json")
+
+train_sequence = movies[1][:, 0][0]
+valid_sequence_length = len(train_sequence)
+train_sequence_length = len(train_sequence)
 nr_train_steps = train_sequence_length // batch_size
 nr_val_steps = valid_sequence_length // batch_size
 
-x = np.linspace(0 - np.pi / 2, 2 * np.pi + np.pi / 2, train_sequence_length)
-train_sequence = np.sin(x)
 now = datetime.datetime.now()
 path = 'models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
 
