@@ -3,12 +3,12 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
+from Wavenet import ParseLfpBinaries
 from keras import losses, optimizers, callbacks
 from keras.callbacks import TensorBoard
 from keras.layers import Flatten, Dense, \
     Input, Activation, Conv1D, Add, Multiply
 from keras.models import Model, load_model
-import ParseLfpBinaries
 
 
 class PlotCallback(callbacks.Callback):
@@ -27,31 +27,16 @@ class PlotCallback(callbacks.Callback):
     def on_epoch_end(self, epoch, logs={}):
         self.epoch += 1
         if self.epoch % 2 == 0 or self.epoch == 1 or self.epoch == self.nr_epochs:
-            starting_point = 0
-            nr_predictions = min(3000, train_sequence_length - starting_point - frame_size - 1)
-            predictions = np.zeros(nr_predictions)
-            position = 0
-
-            for step in range(starting_point, starting_point + nr_predictions):
-                input = np.reshape(train_sequence[step:step + frame_size], (-1, frame_size, 1))
-                predicted = self.model.predict(input)
-                predictions[position] = predicted
-                position += 1
-            plt.figure()
-            plt.title(model_name)
-            plt.plot(train_sequence[:nr_predictions+frame_size], label="Train")
-            plt.plot(range(starting_point + frame_size, starting_point + nr_predictions + frame_size), predictions,
-                     label="Predicted")
-            plt.legend()
-            plt.savefig(self.save_path + '/' + str(epoch) + ".png")
+            plot_predictions(self.model, self.epoch, self.save_path)
         return
 
 
-def plot_predictions(model, save=False):
+def plot_predictions(model, epoch, save_path):
     starting_point = 0
     nr_predictions = min(3000, train_sequence_length - starting_point - frame_size - 1)
     predictions = np.zeros(nr_predictions)
     position = 0
+
     for step in range(starting_point, starting_point + nr_predictions):
         input = np.reshape(train_sequence[step:step + frame_size], (-1, frame_size, 1))
         predicted = model.predict(input)
@@ -59,14 +44,15 @@ def plot_predictions(model, save=False):
         position += 1
     plt.figure()
     plt.title(model_name)
-    plt.plot(train_sequence[nr_predictions], label="Train")
+    plt.plot(train_sequence[:nr_predictions + frame_size], label="Train")
     plt.plot(range(starting_point + frame_size, starting_point + nr_predictions + frame_size), predictions,
              label="Predicted")
     plt.legend()
+    plt.savefig(save_path + '/' + str(epoch) + ".png")
     plt.show()
 
 
-def wavenetBlock(n_filters, filter_size, dilation_rate):
+def wavenet_block(n_filters, filter_size, dilation_rate):
     def f(input_):
         residual = input_
         tanh_out = Conv1D(n_filters, filter_size,
@@ -79,7 +65,7 @@ def wavenetBlock(n_filters, filter_size, dilation_rate):
                              activation='sigmoid')(input_)
 
         merged = Multiply()([tanh_out, sigmoid_out])
-        skip_out = Conv1D(n_filters, 1, padding='same')(merged)
+        skip_out = Conv1D(n_filters * 2, 1, padding='same')(merged)
 
         out = Conv1D(n_filters, 1, padding='same')(merged)
         full_out = Add(name="Block_{}_Out".format(dilation_rate))([out, residual])
@@ -100,12 +86,12 @@ def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clip
         clipvalue = None
 
     input_ = Input(shape=(input_size, 1))
-    A, B = wavenetBlock(nr_filters, 2, 1)(input_)
+    A, B = wavenet_block(nr_filters, 2, 1)(input_)
     # A = Conv1D(nr_filters, 2, dilation_rate=1, padding='same')(input_)
     skip_connections = [B]
     for i in range(1, nr_layers):
         dilation_rate = 2 ** i
-        A, B = wavenetBlock(nr_filters, 2, dilation_rate)(A)
+        A, B = wavenet_block(nr_filters, 2, dilation_rate)(A)
         skip_connections.append(B)
     net = Add()(skip_connections)
     net = Activation('relu')(net)
@@ -175,14 +161,14 @@ def train_model(nr_train_steps, nr_val_steps, clip, random, save_path):
     print('\nDone!')
 
 
-def test_model():
+def test_model(save_path):
     model = load_model(
-        path + '.h5')
-    plot_predictions(model)
+        save_path + '.h5')
+    plot_predictions(model, "After_training", save_path)
 
 
 n_epochs = 10
-batch_size = 32
+batch_size = 64
 nr_layers = 6
 frame_size = 2 ** nr_layers
 nr_filters = 32
@@ -199,7 +185,7 @@ model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}"
                                                                                         batch_size, nr_filters,
                                                                                         frame_shift, loss, clip, random)
 
-movies = ParseLfpBinaries.ParseLfps("/home/gabir/DATASETS/CER01A50/Bin_cer01a50-LFP.json")
+movies = ParseLfpBinaries.ParseLfps("/home/pasca/School/Licenta/Datasets/CER01A50/Bin_cer01a50-LFP.json")
 
 train_sequence = movies[1][:, 0][0]
 valid_sequence_length = len(train_sequence)
@@ -208,11 +194,11 @@ nr_train_steps = train_sequence_length // batch_size
 nr_val_steps = valid_sequence_length // batch_size
 
 now = datetime.datetime.now()
-path = 'models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
+save_path = 'LFP_models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
 
-if not os.path.exists(path):
-    os.makedirs(path)
+if not os.path.exists(save_path):
+    os.makedirs(save_path)
 
 if __name__ == '__main__':
-    train_model(nr_train_steps, nr_val_steps, clip, random, path)
-    test_model()
+    train_model(nr_train_steps, nr_val_steps, clip, random, save_path)
+    test_model(save_path)

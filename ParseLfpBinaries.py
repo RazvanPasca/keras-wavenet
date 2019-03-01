@@ -1,7 +1,7 @@
-import numpy as np
-import matplotlib.pyplot as plt
 import json
 import os
+
+import numpy as np
 
 
 class LfpData:
