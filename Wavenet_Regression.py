@@ -52,12 +52,12 @@ def plot_predictions(model, epoch, save_path, nr_steps=10000, starting_point=0, 
     else:
         input_sequence = np.reshape(train_sequence[:frame_size], (-1, frame_size, 1))
         for step in range(starting_point, starting_point + nr_predictions):
-            predicted = model.predict(input_sequence[:, -frame_size:, :])
+            predicted = model.predict(input_sequence)
             predictions[position] = predicted
-            input_sequence = np.append(input_sequence, np.reshape(predicted, (-1, 1, 1)), axis=1)
+            input_sequence = np.append(input_sequence[:, 1:, :], np.reshape(predicted, (-1, 1, 1)), axis=1)
             position += 1
 
-    plt.figure(figsize=(9, 6))
+    plt.figure(figsize=(13, 10))
     plt.title("\n".join(wrap(model_name + '_TeacherF:' + str(teacher_forcing), 33)))
     plt.plot(train_sequence[:nr_predictions + frame_size], label="Original sequence")
     plt.plot(range(starting_point + frame_size, starting_point + nr_predictions + frame_size), predictions,
@@ -180,8 +180,8 @@ def test_model(save_path):
     model = load_model(
         save_path + '.h5')
     model.summary()
-    plot_predictions(model, "After_training", save_path, teacher_forcing=False)
-    plot_predictions(model, "After_training_TF", save_path, teacher_forcing=True)
+    plot_predictions(model, "After_training", save_path, nr_steps=500, teacher_forcing=False)
+    plot_predictions(model, "After_training_TF", save_path, nr_steps=500, teacher_forcing=True)
 
 
 n_epochs = 10
@@ -218,5 +218,6 @@ if not os.path.exists(save_path):
     os.makedirs(save_path)
 
 if __name__ == '__main__':
-    train_model(nr_train_steps, nr_val_steps, clip, random, save_path)
-    test_model(save_path)
+    # train_model(nr_train_steps, nr_val_steps, clip, random, save_path)
+    test_model(
+        'LFP_models/Wavenet_L:6_Ep:10_Lr:0.0001_BS:32_Filters:32_FS:8_MSE_Clip:True_Rnd:True/2019-03-02 00:15')
