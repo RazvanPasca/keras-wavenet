@@ -52,7 +52,7 @@ def plot_predictions(model, epoch, save_path, nr_steps=10000, starting_point=0, 
     else:
         input_sequence = np.reshape(train_sequence[:frame_size], (-1, frame_size, 1))
         for step in range(starting_point, starting_point + nr_predictions):
-            predicted = model.predict(input_sequence)
+            predicted = model.predict(input_sequence[:, -frame_size:, :])
             predictions[position] = predicted
             input_sequence = np.append(input_sequence, np.reshape(predicted, (-1, 1, 1)), axis=1)
             position += 1
