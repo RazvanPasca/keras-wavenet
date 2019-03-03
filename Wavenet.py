@@ -51,7 +51,7 @@ def plot_predictions(epoch, nr_predictions, predictions, save_path, starting_poi
 
 def decode_model_output(model_logits, classifying):
     if classifying:
-        bin_index = np.argmax(model_logits) + 1
+        bin_index = np.argmax(model_logits)
         a = (bins[bin_index - 1] + bins[bin_index]) / 2
         return a
     else:
@@ -247,8 +247,10 @@ model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}"
 # movies = ParseLfpBinaries.ParseLfps("/home/pasca/School/Licenta/Datasets/CER01A50/Bin_cer01a50-LFP.json")
 # train_sequence = movies[1][:, 0][0]
 train_sequence = np.sin(np.linspace(0, 6 * np.pi, 2048))
+min_train_seq = np.floor(np.min(train_sequence))
+max_train_seq = np.ceil(np.max(train_sequence))
 nr_bins = 256
-bins = np.linspace(np.min(train_sequence), np.max(train_sequence), nr_bins + 1)
+bins = np.linspace(min_train_seq, max_train_seq, nr_bins)
 bin_size = bins[1] - bins[0]
 
 valid_sequence_length = len(train_sequence)
