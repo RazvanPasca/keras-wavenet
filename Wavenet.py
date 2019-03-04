@@ -8,7 +8,7 @@ from keras import losses, optimizers, callbacks
 from keras.activations import softmax
 from keras.callbacks import TensorBoard, CSVLogger
 from keras.layers import Flatten, Dense, \
-    Input, Activation, Conv1D, Add, Multiply, Lambda
+    Input, Activation, Conv1D, Add, Multiply
 from keras.models import Model, load_model
 
 from LFP_Dataset import LFPDataset
@@ -124,12 +124,7 @@ def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clip
     net = Flatten()(net)
 
     if model_loss is losses.sparse_categorical_crossentropy:
-        net = Lambda(lambda x: x + 1e-9)(net)
         net = Dense(output_size, activation=softmax, name="Model_Output")(net)
-        # epsilons = np.array([1e-10 for _ in range(output_size)])
-        # k_epsilons = variable(epsilons)
-        # epsilon_inputs = Input(tensor=k_epsilons)
-        # net = Add()([net, epsilon_inputs])
     else:
         net = Dense(1, name="Model_Output")(net)
 
@@ -162,7 +157,7 @@ def train_model(nr_train_steps, nr_val_steps, clip, random, save_path):
     print('Total training steps:', nr_train_steps)
     print('Total validation steps:', nr_val_steps)
     classifying = True if loss == "CAT" else False
-    outputTransform = encode_input_to_bin if classifying else lambda x: x
+    output_transform = encode_input_to_bin if classifying else lambda x: x
 
     tensor_board_callback = TensorBoard(log_dir=save_path, write_graph=True)
     log_callback = CSVLogger(save_path + "/session_log.csv")
@@ -170,10 +165,10 @@ def train_model(nr_train_steps, nr_val_steps, clip, random, save_path):
                                         nr_predictions_steps=3000,
                                         save_path=save_path)
 
-    model.fit_generator(dataset.train_frame_generator(frame_size, batch_size, outputTransform),
+    model.fit_generator(dataset.train_frame_generator(frame_size, batch_size, output_transform),
                         steps_per_epoch=nr_train_steps, epochs=n_epochs,
                         validation_data=dataset.validation_frame_generator(frame_size, batch_size,
-                                                                           outputTransform),
+                                                                           output_transform),
                         validation_steps=nr_val_steps, verbose=2,
                         callbacks=[tensor_board_callback, plot_figure_callback, log_callback])
 
@@ -192,7 +187,7 @@ def test_model(save_path):
 
 
 n_epochs = 50
-batch_size = 32
+batch_size = 64
 nr_layers = 6
 frame_size = 2 ** nr_layers
 nr_filters = 32
@@ -216,12 +211,17 @@ max_train_seq = np.ceil(dataset.values_range[1])
 nr_bins = 256
 bins = np.linspace(min_train_seq, max_train_seq, nr_bins)
 bin_size = bins[1] - bins[0]
-nr_train_steps = dataset.train_length // batch_size
-nr_val_steps = dataset.validation_length // batch_size
+nr_train_steps = dataset.get_total_length("TRAIN") // batch_size // 2
+nr_val_steps = dataset.get_total_length("VAL") // batch_size // 2
 
 now = datetime.datetime.now()
 save_path = 'LFP_models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
 
 if __name__ == '__main__':
+    # channels = [0, 2, 4, 6, 8, 10, 12, 14, 16, 17, 22]
+    # movie = 3
+    # for trial in range(dataset.trials_per_condition):
+    #     for channel in channels:
+    #         dataset.plot_signal(movie, trial, channel, stop=3000, save=True)
     train_model(nr_train_steps, nr_val_steps, clip, random, save_path)
     test_model(save_path)
