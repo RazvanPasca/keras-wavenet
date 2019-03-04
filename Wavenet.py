@@ -1,5 +1,9 @@
-import datetime
 import os
+
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+import datetime
 from textwrap import wrap
 
 import matplotlib.pyplot as plt
@@ -31,7 +35,7 @@ class PlotCallback(callbacks.Callback):
     def on_epoch_end(self, epoch, logs={}):
         self.epoch += 1
 
-        if self.epoch % 10 == 0 or self.epoch == 1 or self.epoch == self.nr_epochs:
+        if self.epoch % 1 == 0 or self.epoch == 1 or self.epoch == self.nr_epochs:
             get_predictions(self.model, self.epoch, self.save_path, self.classifying, nr_steps=self.nr_prediction_steps,
                             starting_point=0, teacher_forcing=True)
             get_predictions(self.model, self.epoch, self.save_path, self.classifying, nr_steps=self.nr_prediction_steps,
@@ -51,26 +55,31 @@ def plot_predictions(train_seq, epoch, nr_predictions, predictions, save_path, s
 
 
 def get_predictions(model, epoch, save_path, classifying, nr_steps=10000, starting_point=0, teacher_forcing=True):
-    nr_predictions = min(nr_steps, dataset.train_length - starting_point - frame_size - 1)
-    train_seq = dataset.get_validation_set(1, 1, 0)
+    nr_predictions = min(nr_steps, dataset.val_length - starting_point - frame_size - 1)
+    seqs_to_predict = [dataset.validation[1][0, 0, :],
+                       dataset.validation[1][5, 10, :],
+                       dataset.validation[1][7, 19, :],
+                       dataset.validation[1][1, 5, :],
+                       dataset.validation[1][3, 3, :]]
     predictions = np.zeros(nr_predictions)
     position = 0
 
-    if teacher_forcing:
-        for step in range(starting_point, starting_point + nr_predictions):
-            input_sequence = np.reshape(train_seq[step:step + frame_size], (-1, frame_size, 1))
-            predicted = decode_model_output(model.predict(input_sequence), classifying)
-            predictions[position] = predicted
-            position += 1
-    else:
-        input_sequence = np.reshape(train_seq[:frame_size], (-1, frame_size, 1))
-        for step in range(starting_point, starting_point + nr_predictions):
-            predicted = decode_model_output(model.predict(input_sequence), classifying)
-            predictions[position] = predicted
-            input_sequence = np.append(input_sequence[:, 1:, :], np.reshape(predicted, (-1, 1, 1)), axis=1)
-            position += 1
+    for sequence in seqs_to_predict:
+        if teacher_forcing:
+            for step in range(starting_point, starting_point + nr_predictions):
+                input_sequence = np.reshape(sequence[step:step + frame_size], (-1, frame_size, 1))
+                predicted = decode_model_output(model.predict(input_sequence), classifying)
+                predictions[position] = predicted
+                position += 1
+        else:
+            input_sequence = np.reshape(sequence[:frame_size], (-1, frame_size, 1))
+            for step in range(starting_point, starting_point + nr_predictions):
+                predicted = decode_model_output(model.predict(input_sequence), classifying)
+                predictions[position] = predicted
+                input_sequence = np.append(input_sequence[:, 1:, :], np.reshape(predicted, (-1, 1, 1)), axis=1)
+                position += 1
 
-    plot_predictions(train_seq, epoch, nr_predictions, predictions, save_path, starting_point, teacher_forcing)
+        plot_predictions(sequence, epoch, nr_predictions, predictions, save_path, starting_point, teacher_forcing)
 
 
 def wavenet_block(n_filters, filter_size, dilation_rate):
@@ -169,7 +178,7 @@ def train_model(nr_train_steps, nr_val_steps, clip, random, save_path):
                         steps_per_epoch=nr_train_steps, epochs=n_epochs,
                         validation_data=dataset.validation_frame_generator(frame_size, batch_size,
                                                                            output_transform),
-                        validation_steps=nr_val_steps, verbose=2,
+                        validation_steps=nr_val_steps, verbose=1,
                         callbacks=[tensor_board_callback, plot_figure_callback, log_callback])
 
     print('Saving model and results...')
@@ -204,7 +213,7 @@ model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}"
                                                                                         batch_size, nr_filters,
                                                                                         frame_shift, loss, clip,
                                                                                         random)
-dataset = LFPDataset("/home/pasca/School/Licenta/Datasets/CER01A50/Bin_cer01a50-LFP.json", )
+dataset = LFPDataset("/home/gabir/DATASETS/CER01A50/Bin_cer01a50-LFP.json", )
 
 min_train_seq = np.floor(dataset.values_range[0])
 max_train_seq = np.ceil(dataset.values_range[1])

@@ -136,7 +136,7 @@ class LFPDataset:
             return self.train[1].size + self.train[2].size + self.train[3].size
         elif partition == "VAL":
             return self.validation[1].size + self.validation[2].size + self.validation[3].size
-        elif partition == "TRAIN":
+        elif partition == "TEST":
             return self.test[1].size + self.test[2].size + self.test[3].size
         else:
             raise ValueError("Please pick a valid partition from: TRAIN, VAL and TRAIN")
