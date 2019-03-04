@@ -1,6 +1,7 @@
 import json
-import numpy as np
 import os
+
+import numpy as np
 
 
 class LFPDataset:
@@ -29,6 +30,8 @@ class LFPDataset:
                          2: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length)),
                          3: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length))}
         cur_element = [0, 0, 0, 0]
+
+        """Iterate over all channels and place them in the dictionary. A channel has length = trial_length"""
         for i in range(0, self.channels.shape[1] // self.trial_length):
             condition_number = self.stimulusOrder[i]
             self.lfp_data[condition_number][cur_element[condition_number], :, :] = self.channels[:,

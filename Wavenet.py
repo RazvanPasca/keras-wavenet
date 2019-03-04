@@ -1,15 +1,16 @@
 import datetime
 import os
+from textwrap import wrap
+
 import matplotlib.pyplot as plt
 import numpy as np
-
-from textwrap import wrap
 from keras import losses, optimizers, callbacks
 from keras.activations import softmax
-from keras.callbacks import TensorBoard
+from keras.callbacks import TensorBoard, CSVLogger
 from keras.layers import Flatten, Dense, \
     Input, Activation, Conv1D, Add, Multiply, Lambda
 from keras.models import Model, load_model
+
 from LFP_Dataset import LFPDataset
 
 
@@ -29,6 +30,7 @@ class PlotCallback(callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs={}):
         self.epoch += 1
+
         if self.epoch % 10 == 0 or self.epoch == 1 or self.epoch == self.nr_epochs:
             get_predictions(self.model, self.epoch, self.save_path, self.classifying, nr_steps=self.nr_prediction_steps,
                             starting_point=0, teacher_forcing=True)
@@ -163,17 +165,19 @@ def train_model(nr_train_steps, nr_val_steps, clip, random, save_path):
     outputTransform = encode_input_to_bin if classifying else lambda x: x
 
     tensor_board_callback = TensorBoard(log_dir=save_path, write_graph=True)
+    log_callback = CSVLogger(save_path + "/session_log.csv")
     plot_figure_callback = PlotCallback(model_name, n_epochs, classifying, frame_size=frame_size,
                                         nr_predictions_steps=3000,
                                         save_path=save_path)
 
     model.fit_generator(dataset.train_frame_generator(frame_size, batch_size, outputTransform),
                         steps_per_epoch=nr_train_steps, epochs=n_epochs,
-                        validation_data=dataset.validation_frame_generator(frame_size, batch_size, outputTransform),
+                        validation_data=dataset.validation_frame_generator(frame_size, batch_size,
+                                                                           outputTransform),
                         validation_steps=nr_val_steps, verbose=2,
-                        callbacks=[tensor_board_callback, plot_figure_callback])
+                        callbacks=[tensor_board_callback, plot_figure_callback, log_callback])
 
-    print('Saving model...')
+    print('Saving model and results...')
     model.save(save_path + '.h5')
     print('\nDone!')
 
@@ -205,7 +209,7 @@ model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}"
                                                                                         batch_size, nr_filters,
                                                                                         frame_shift, loss, clip,
                                                                                         random)
-dataset = LFPDataset("/home/gabir/DATASETS/CER01A50/Bin_cer01a50-LFP.json", )
+dataset = LFPDataset("/home/pasca/School/Licenta/Datasets/CER01A50/Bin_cer01a50-LFP.json", )
 
 min_train_seq = np.floor(dataset.values_range[0])
 max_train_seq = np.ceil(dataset.values_range[1])
