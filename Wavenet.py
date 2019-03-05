@@ -19,7 +19,7 @@ from LFP_Dataset import LFPDataset
 
 
 class PlotCallback(callbacks.Callback):
-    def __init__(self, model_name, nr_epochs, classifying, frame_size, nr_predictions_steps, save_path):
+    def __init__(self, model_name, nr_epochs, plot_period, classifying, frame_size, nr_predictions_steps, save_path):
         super().__init__()
         self.model_name = model_name
         self.epoch = 0
@@ -28,6 +28,7 @@ class PlotCallback(callbacks.Callback):
         self.nr_prediction_steps = nr_predictions_steps
         self.frame_size = frame_size
         self.classifying = classifying
+        self.plot_period = plot_period
 
     def on_train_begin(self, logs={}):
         return
@@ -35,7 +36,7 @@ class PlotCallback(callbacks.Callback):
     def on_epoch_end(self, epoch, logs={}):
         self.epoch += 1
 
-        if self.epoch % 1 == 0 or self.epoch == 1 or self.epoch == self.nr_epochs:
+        if self.epoch % self.plot_period == 0 or self.epoch == 1 or self.epoch == self.nr_epochs:
             get_predictions(self.model, self.epoch, self.save_path, self.classifying, nr_steps=self.nr_prediction_steps,
                             starting_point=0, teacher_forcing=True)
             get_predictions(self.model, self.epoch, self.save_path, self.classifying, nr_steps=self.nr_prediction_steps,
@@ -95,7 +96,7 @@ def wavenet_block(n_filters, filter_size, dilation_rate):
                              activation='sigmoid')(input_)
 
         merged = Multiply()([tanh_out, sigmoid_out])
-        skip_out = Conv1D(n_filters * 4, 1, padding='same')(merged)
+        skip_out = Conv1D(n_filters * 2, 1, padding='same')(merged)
 
         out = Conv1D(n_filters, 1, padding='same')(merged)
         full_out = Add(name="Block_{}_Out".format(dilation_rate))([out, residual])
@@ -104,7 +105,8 @@ def wavenet_block(n_filters, filter_size, dilation_rate):
     return f
 
 
-def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clipping, output_size=256):
+def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clipping, skip_conn_filters,
+                               output_size=256):
     if loss is "MSE":
         model_loss = losses.MSE
     elif loss is "MAE":
@@ -128,8 +130,8 @@ def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clip
         skip_connections.append(B)
     net = Add()(skip_connections)
     net = Activation('relu')(net)
-    net = Conv1D(nr_bins, 1, activation='relu')(net)
-    net = Conv1D(nr_bins, 1)(net)
+    net = Conv1D(skip_conn_filters, 1, activation='relu')(net)
+    net = Conv1D(skip_conn_filters, 1)(net)
     net = Flatten()(net)
 
     if model_loss is losses.sparse_categorical_crossentropy:
@@ -144,7 +146,7 @@ def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clip
     return model
 
 
-def encode_input_to_bin(target_val):
+def encode_input_to_bin(target_val, bins):
     bin = np.searchsorted(bins, target_val, side='left')
     return bin
 
@@ -157,27 +159,26 @@ def decode_model_output(model_logits, classifying):
     return model_logits
 
 
-def train_model(nr_train_steps, nr_val_steps, clip, random, save_path):
+def train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters):
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
-    model = get_basic_generative_model(nr_filters, frame_size, nr_layers, lr=lr, loss=loss, clipping=clip)
+    model = get_basic_generative_model(nr_filters, frame_size, nr_layers, lr=lr, loss=loss, clipping=clip,
+                                       skip_conn_filters=skip_conn_filters)
 
     print('Total training steps:', nr_train_steps)
     print('Total validation steps:', nr_val_steps)
     classifying = True if loss == "CAT" else False
-    output_transform = encode_input_to_bin if classifying else lambda x: x
 
     tensor_board_callback = TensorBoard(log_dir=save_path, write_graph=True)
     log_callback = CSVLogger(save_path + "/session_log.csv")
-    plot_figure_callback = PlotCallback(model_name, n_epochs, classifying, frame_size=frame_size,
+    plot_figure_callback = PlotCallback(model_name, n_epochs, 1, classifying, frame_size=frame_size,
                                         nr_predictions_steps=3000,
                                         save_path=save_path)
 
-    model.fit_generator(dataset.train_frame_generator(frame_size, batch_size, output_transform),
+    model.fit_generator(train_data=dataset.train_frame_generator(frame_size, batch_size, classifying),
                         steps_per_epoch=nr_train_steps, epochs=n_epochs,
-                        validation_data=dataset.validation_frame_generator(frame_size, batch_size,
-                                                                           output_transform),
+                        validation_data=dataset.validation_frame_generator(frame_size, batch_size, classifying),
                         validation_steps=nr_val_steps, verbose=1,
                         callbacks=[tensor_board_callback, plot_figure_callback, log_callback])
 
@@ -205,6 +206,8 @@ lr = 0.0001
 loss = 'CAT'
 clip = True
 random = True
+nr_bins = 256
+skip_conn_filters = 64
 
 print("Frame size is {}".format(frame_size))
 model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}".format(nr_layers,
@@ -213,15 +216,15 @@ model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}"
                                                                                         batch_size, nr_filters,
                                                                                         frame_shift, loss, clip,
                                                                                         random)
-dataset = LFPDataset("/home/gabir/DATASETS/CER01A50/Bin_cer01a50-LFP.json", )
+
+dataset = LFPDataset("/home/pasca/School/Licenta/Datasets/CER01A50/Bin_cer01a50-LFP.json", nr_bins=nr_bins)
 
 min_train_seq = np.floor(dataset.values_range[0])
 max_train_seq = np.ceil(dataset.values_range[1])
-nr_bins = 256
 bins = np.linspace(min_train_seq, max_train_seq, nr_bins)
 bin_size = bins[1] - bins[0]
-nr_train_steps = dataset.get_total_length("TRAIN") // batch_size // 2
-nr_val_steps = dataset.get_total_length("VAL") // batch_size // 2
+nr_train_steps = dataset.get_total_length("TRAIN") // batch_size // 4
+nr_val_steps = dataset.get_total_length("VAL") // batch_size // 4
 
 now = datetime.datetime.now()
 save_path = 'LFP_models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
@@ -232,5 +235,5 @@ if __name__ == '__main__':
     # for trial in range(dataset.trials_per_condition):
     #     for channel in channels:
     #         dataset.plot_signal(movie, trial, channel, stop=3000, save=True)
-    train_model(nr_train_steps, nr_val_steps, clip, random, save_path)
+    train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters=skip_conn_filters)
     test_model(save_path)
