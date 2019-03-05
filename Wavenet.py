@@ -176,7 +176,7 @@ def train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn
                                         nr_predictions_steps=3000,
                                         save_path=save_path)
 
-    model.fit_generator(train_data=dataset.train_frame_generator(frame_size, batch_size, classifying),
+    model.fit_generator(dataset.train_frame_generator(frame_size, batch_size, classifying),
                         steps_per_epoch=nr_train_steps, epochs=n_epochs,
                         validation_data=dataset.validation_frame_generator(frame_size, batch_size, classifying),
                         validation_steps=nr_val_steps, verbose=1,
@@ -229,11 +229,11 @@ nr_val_steps = dataset.get_total_length("VAL") // batch_size // 4
 now = datetime.datetime.now()
 save_path = 'LFP_models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
 
-if __name__ == '__main__':
-    # channels = [0, 2, 4, 6, 8, 10, 12, 14, 16, 17, 22]
-    # movie = 3
-    # for trial in range(dataset.trials_per_condition):
-    #     for channel in channels:
-    #         dataset.plot_signal(movie, trial, channel, stop=3000, save=True)
-    train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters=skip_conn_filters)
-    test_model(save_path)
+# if __name__ == '__main__':
+#     # channels = [0, 2, 4, 6, 8, 10, 12, 14, 16, 17, 22]
+#     # movie = 3
+#     # for trial in range(dataset.trials_per_condition):
+#     #     for channel in channels:
+#     #         dataset.plot_signal(movie, trial, channel, stop=3000, save=True)
+#     train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters=skip_conn_filters)
+#     test_model(save_path)
