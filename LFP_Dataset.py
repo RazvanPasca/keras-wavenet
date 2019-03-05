@@ -1,5 +1,6 @@
 import json
 import os
+from timeit import default_timer as timer
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -42,14 +43,14 @@ class LFPDataset:
             condition_number = self.stimulusOrder[i]
             self.lfp_data[condition_number][cur_element[condition_number], :, :] = self.channels[:,
                                                                                    (i * self.trial_length):((
-                                                                                                                    i * self.trial_length) + self.trial_length)]
+                                                                                                                        i * self.trial_length) + self.trial_length)]
             cur_element[condition_number] += 1
         self.trial_length = lfp_data['trial_length']
         min_val = min(np.min(self.lfp_data[1]), np.min(self.lfp_data[2]), np.min(self.lfp_data[3]))
         max_val = max(np.max(self.lfp_data[1]), np.max(self.lfp_data[2]), np.max(self.lfp_data[3]))
         self.values_range = min_val, max_val
         self._get_train_val_test_split(train_perc, test_perc, val_perc)
-        self._pre_compute_bins()
+        # self._pre_compute_bins()
 
     def _pre_compute_bins(self):
         self.classes = {}
@@ -57,9 +58,12 @@ class LFPDataset:
         max_train_seq = np.ceil(self.values_range[1])
         self.bins = np.linspace(min_train_seq, max_train_seq, self.nr_bins)
         self.bin_size = self.bins[1] - self.bins[0]
+        start = timer()
         for movie in self.lfp_data.values():
             for value in movie.flatten():
                 self.classes[value] = self._encode_input_to_bin(value)
+        end = timer()
+        print("Time needed for precomputing classes", end - start)
 
     def _encode_input_to_bin(self, target_val):
         bin = np.searchsorted(self.bins, target_val, side='left')
