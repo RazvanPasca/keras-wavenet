@@ -6,7 +6,6 @@ from LFP_Dataset import LFPDataset
 
 dataset = LFPDataset("/home/razpa/CER01A50/Bin_cer01a50-LFP.json")
 
-
 def rmse(a, b):
     return np.sqrt(np.mean((a - b) ** 2))
 
