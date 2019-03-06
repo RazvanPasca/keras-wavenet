@@ -1,7 +1,7 @@
 import os
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import datetime
 from textwrap import wrap
@@ -19,21 +19,19 @@ from LFP_Dataset import LFPDataset
 
 from keras.backend.tensorflow_backend import set_session
 import tensorflow as tf
+
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
-config.log_device_placement = True  # to log device placement (on which device the operation ran)
-
 sess = tf.Session(config=config)
-
 set_session(sess)  # set this TensorFlow session as the default session for Keras
 
+
 class PlotCallback(callbacks.Callback):
-    def __init__(self, model_name, nr_epochs, plot_period, classifying, frame_size, nr_predictions_steps, save_path):
+    def __init__(self, model_name, plot_period, classifying, frame_size, nr_predictions_steps, save_path):
         super().__init__()
         self.model_name = model_name
         self.epoch = 0
         self.save_path = save_path
-        self.nr_epochs = nr_epochs
         self.nr_prediction_steps = nr_predictions_steps
         self.frame_size = frame_size
         self.classifying = classifying
@@ -45,12 +43,19 @@ class PlotCallback(callbacks.Callback):
     def on_epoch_end(self, epoch, logs={}):
         self.epoch += 1
 
-        if self.epoch % self.plot_period == 0 or self.epoch == 1 or self.epoch == self.nr_epochs:
+        if self.epoch % self.plot_period == 0 or self.epoch == 1:
             get_predictions(self.model, self.epoch, self.save_path, self.classifying, nr_steps=self.nr_prediction_steps,
                             starting_point=0, teacher_forcing=True)
             get_predictions(self.model, self.epoch, self.save_path, self.classifying, nr_steps=self.nr_prediction_steps,
                             starting_point=0, teacher_forcing=False)
         return
+
+    def on_train_end(self, logs=None):
+        get_predictions(self.model, self.epoch, self.save_path, self.classifying, nr_steps=self.nr_prediction_steps,
+                        starting_point=0, teacher_forcing=True)
+        get_predictions(self.model, self.epoch, self.save_path, self.classifying, nr_steps=self.nr_prediction_steps,
+                        starting_point=0, teacher_forcing=False)
+        return 
 
 
 def plot_predictions(train_seq, epoch, nr_predictions, predictions, save_path, starting_point, teacher_forcing):
@@ -66,11 +71,11 @@ def plot_predictions(train_seq, epoch, nr_predictions, predictions, save_path, s
 
 def get_predictions(model, epoch, save_path, classifying, nr_steps=10000, starting_point=0, teacher_forcing=True):
     nr_predictions = min(nr_steps, dataset.val_length - starting_point - frame_size - 1)
-    seqs_to_predict = [dataset.validation[1][0, 0, :],
-                       dataset.validation[1][5, 10, :],
-                       dataset.validation[1][7, 19, :],
-                       dataset.validation[1][1, 5, :],
-                       dataset.validation[1][3, 3, :]]
+    seqs_to_predict = [dataset.validation[1][0, 0, :],]
+                       #dataset.validation[1][5, 10, :],
+                       #dataset.validation[1][7, 19, :],
+                       #dataset.validation[1][1, 5, :],
+                      # dataset.validation[1][3, 3, :]]
     predictions = np.zeros(nr_predictions)
     position = 0
 
@@ -155,15 +160,10 @@ def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clip
     return model
 
 
-def encode_input_to_bin(target_val, bins):
-    bin = np.searchsorted(bins, target_val, side='left')
-    return bin
-
-
 def decode_model_output(model_logits, classifying):
     if classifying:
         bin_index = np.argmax(model_logits)
-        a = (bins[bin_index - 1] + bins[bin_index]) / 2
+        a = (dataset.bins[bin_index - 1] + dataset.bins[bin_index]) / 2
         return a
     return model_logits
 
@@ -181,14 +181,13 @@ def train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn
 
     tensor_board_callback = TensorBoard(log_dir=save_path, write_graph=True)
     log_callback = CSVLogger(save_path + "/session_log.csv")
-    plot_figure_callback = PlotCallback(model_name, n_epochs, 1, classifying, frame_size=frame_size,
-                                        nr_predictions_steps=3000,
+    plot_figure_callback = PlotCallback(model_name, 1, classifying, frame_size=frame_size,
+                                        nr_predictions_steps=1000,
                                         save_path=save_path)
 
     model.fit_generator(dataset.train_frame_generator(frame_size, batch_size, classifying),
                         steps_per_epoch=nr_train_steps, epochs=n_epochs,
-                        validation_data=dataset.validation_frame_generator(frame_size, batch_size, classifying),
-                        validation_steps=nr_val_steps, verbose=1,
+                        verbose=1,
                         callbacks=[tensor_board_callback, plot_figure_callback, log_callback])
 
     print('Saving model and results...')
@@ -206,7 +205,7 @@ def test_model(save_path):
 
 
 n_epochs = 50
-batch_size = 64
+batch_size = 32
 nr_layers = 6
 frame_size = 2 ** nr_layers
 nr_filters = 32
@@ -216,33 +215,30 @@ loss = 'CAT'
 clip = True
 random = True
 nr_bins = 256
-skip_conn_filters = 64
+skip_conn_filters = 128
 
 print("Frame size is {}".format(frame_size))
-model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Filters:{}_FS:{}_{}_Clip:{}_Rnd:{}".format(nr_layers,
+model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Fltrs:{}_SkipFltrs:{}_FS:{}_{}_Clip:{}_Rnd:{}".format(nr_layers,
                                                                                         n_epochs,
                                                                                         lr,
-                                                                                        batch_size, nr_filters,
+                                                                                        batch_size, nr_filters,skip_conn_filters,
                                                                                         frame_shift, loss, clip,
                                                                                         random)
 
-dataset = LFPDataset("/home/pasca/School/Licenta/Datasets/CER01A50/Bin_cer01a50-LFP.json", nr_bins=nr_bins)
+dataset = LFPDataset("/home/razpa/CER01A50/Bin_cer01a50-LFP.json", nr_bins=nr_bins)
 
-min_train_seq = np.floor(dataset.values_range[0])
-max_train_seq = np.ceil(dataset.values_range[1])
-bins = np.linspace(min_train_seq, max_train_seq, nr_bins)
-bin_size = bins[1] - bins[0]
-nr_train_steps = dataset.get_total_length("TRAIN") // batch_size // 4
-nr_val_steps = dataset.get_total_length("VAL") // batch_size // 4
+nr_train_steps = dataset.get_total_length("TRAIN") // batch_size // 4000
+nr_val_steps = dataset.get_total_length("VAL") // batch_size // 4000
 
 now = datetime.datetime.now()
 save_path = 'LFP_models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
 
-# if __name__ == '__main__':
-#     # channels = [0, 2, 4, 6, 8, 10, 12, 14, 16, 17, 22]
-#     # movie = 3
-#     # for trial in range(dataset.trials_per_condition):
-#     #     for channel in channels:
-#     #         dataset.plot_signal(movie, trial, channel, stop=3000, save=True)
-#     train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters=skip_conn_filters)
-#     test_model(save_path)
+if __name__ == '__main__':
+    # channels = [0, 2, 4, 6, 8, 10, 12, 14, 16, 17, 22]
+    # movie = 3
+    # for trial in range(dataset.trials_per_condition):
+    #     for channel in channels:
+    #         dataset.plot_signal(movie, trial, channel, stop=3000, save=True)
+    train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters=skip_conn_filters)
+    test_model(save_path)
+
