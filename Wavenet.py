@@ -17,6 +17,15 @@ from keras.models import Model, load_model
 
 from LFP_Dataset import LFPDataset
 
+from keras.backend.tensorflow_backend import set_session
+import tensorflow as tf
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
+config.log_device_placement = True  # to log device placement (on which device the operation ran)
+
+sess = tf.Session(config=config)
+
+set_session(sess)  # set this TensorFlow session as the default session for Keras
 
 class PlotCallback(callbacks.Callback):
     def __init__(self, model_name, nr_epochs, plot_period, classifying, frame_size, nr_predictions_steps, save_path):
