@@ -1,7 +1,7 @@
 import os
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 import datetime
 from textwrap import wrap
@@ -55,31 +55,33 @@ class PlotCallback(callbacks.Callback):
                         starting_point=0, teacher_forcing=True)
         get_predictions(self.model, self.epoch, self.save_path, self.classifying, nr_steps=self.nr_prediction_steps,
                         starting_point=0, teacher_forcing=False)
-        return 
+        return
 
 
-def plot_predictions(train_seq, epoch, nr_predictions, predictions, save_path, starting_point, teacher_forcing):
+def plot_predictions(train_seq, title, nr_predictions, predictions, save_path, starting_point, teacher_forcing):
     plt.figure(figsize=(16, 12))
     plt.title("\n".join(wrap(model_name + '_TF:' + str(teacher_forcing), 33)))
     plt.plot(train_seq[:nr_predictions + frame_size], label="Original sequence")
     plt.plot(range(starting_point + frame_size, starting_point + nr_predictions + frame_size), predictions,
              label="Predicted sequence")
     plt.legend()
-    plt.savefig(save_path + '/' + str(epoch) + "TF:" + str(teacher_forcing) + ".png")
+    plt.savefig(save_path + '/' + str(title) + "TF:" + str(teacher_forcing) + ".png")
     plt.show()
 
 
 def get_predictions(model, epoch, save_path, classifying, nr_steps=10000, starting_point=0, teacher_forcing=True):
     nr_predictions = min(nr_steps, dataset.val_length - starting_point - frame_size - 1)
-    seqs_to_predict = [dataset.validation[1][0, 0, :],]
-                       #dataset.validation[1][5, 10, :],
-                       #dataset.validation[1][7, 19, :],
-                       #dataset.validation[1][1, 5, :],
-                      # dataset.validation[1][3, 3, :]]
+    channels = np.random.choice(dataset.nr_channels, 6)
+    trial = np.random.choice(dataset.trials_per_condition, 6)
+    movies = np.arange(1, 4)
+    movies = np.tile(movies, 2)
+    seqs_to_predict = zip(movies, trial, channels)
+
     predictions = np.zeros(nr_predictions)
     position = 0
 
-    for sequence in seqs_to_predict:
+    for m_index, t_index, c_index in seqs_to_predict:
+        sequence = dataset.validation[m_index][t_index, c_index, :]
         if teacher_forcing:
             for step in range(starting_point, starting_point + nr_predictions):
                 input_sequence = np.reshape(sequence[step:step + frame_size], (-1, frame_size, 1))
@@ -94,7 +96,9 @@ def get_predictions(model, epoch, save_path, classifying, nr_steps=10000, starti
                 input_sequence = np.append(input_sequence[:, 1:, :], np.reshape(predicted, (-1, 1, 1)), axis=1)
                 position += 1
 
-        plot_predictions(sequence, epoch, nr_predictions, predictions, save_path, starting_point, teacher_forcing)
+        plot_predictions(sequence, str(epoch) + "M:{}_T:{}_C:{}".format(m_index, t_index, c_index), nr_predictions,
+                         predictions, save_path, starting_point, teacher_forcing)
+        position = 0
 
 
 def wavenet_block(n_filters, filter_size, dilation_rate):
@@ -153,7 +157,7 @@ def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clip
     else:
         net = Dense(1, name="Model_Output")(net)
 
-    model = Model(input=input_, output=net)
+    model = Model(inputs=input_, outputs=net)
     optimizer = optimizers.adam(lr=lr, clipvalue=clipvalue)
     model.compile(loss=model_loss, optimizer=optimizer)
     model.summary()
@@ -182,11 +186,13 @@ def train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn
     tensor_board_callback = TensorBoard(log_dir=save_path, write_graph=True)
     log_callback = CSVLogger(save_path + "/session_log.csv")
     plot_figure_callback = PlotCallback(model_name, 1, classifying, frame_size=frame_size,
-                                        nr_predictions_steps=1000,
+                                        nr_predictions_steps=500,
                                         save_path=save_path)
 
     model.fit_generator(dataset.train_frame_generator(frame_size, batch_size, classifying),
                         steps_per_epoch=nr_train_steps, epochs=n_epochs,
+                        validation_data=dataset.validation_frame_generator(frame_size, batch_size, classifying),
+                        validation_steps=nr_val_steps,
                         verbose=1,
                         callbacks=[tensor_board_callback, plot_figure_callback, log_callback])
 
@@ -206,29 +212,33 @@ def test_model(save_path):
 
 n_epochs = 50
 batch_size = 32
-nr_layers = 6
+nr_layers = 8
 frame_size = 2 ** nr_layers
 nr_filters = 32
 frame_shift = 8
-lr = 0.0001
+lr = 0.00001
 loss = 'CAT'
 clip = True
 random = True
 nr_bins = 256
-skip_conn_filters = 128
+skip_conn_filters = 64
+nr_train_steps = 1850  # dataset.get_total_length("TRAIN") // batch_size // 400
+nr_val_steps = 1000  # np.ceil(0.1*dataset.get_total_length("VAL"))
+np.random.seed(42)
 
 print("Frame size is {}".format(frame_size))
-model_name = "Wavenet_L:{}_Ep:{}_Lr:{}_BS:{}_Fltrs:{}_SkipFltrs:{}_FS:{}_{}_Clip:{}_Rnd:{}".format(nr_layers,
-                                                                                        n_epochs,
-                                                                                        lr,
-                                                                                        batch_size, nr_filters,skip_conn_filters,
-                                                                                        frame_shift, loss, clip,
-                                                                                        random)
-
+model_name = "Wavenet_L:{}_Ep:{}_StpEp:{}_Lr:{}_BS:{}_Fltrs:{}_SkipFltrs:{}_FS:{}_{}_Clip:{}_Rnd:{}".format(nr_layers,
+                                                                                                            n_epochs,
+                                                                                                            nr_train_steps,
+                                                                                                            lr,
+                                                                                                            batch_size,
+                                                                                                            nr_filters,
+                                                                                                            skip_conn_filters,
+                                                                                                            frame_shift,
+                                                                                                            loss, clip,
+                                                                                                            random)
+print(model_name)
 dataset = LFPDataset("/home/razpa/CER01A50/Bin_cer01a50-LFP.json", nr_bins=nr_bins)
-
-nr_train_steps = dataset.get_total_length("TRAIN") // batch_size // 4000
-nr_val_steps = dataset.get_total_length("VAL") // batch_size // 4000
 
 now = datetime.datetime.now()
 save_path = 'LFP_models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
@@ -241,4 +251,3 @@ if __name__ == '__main__':
     #         dataset.plot_signal(movie, trial, channel, stop=3000, save=True)
     train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters=skip_conn_filters)
     test_model(save_path)
-
