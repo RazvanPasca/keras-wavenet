@@ -71,11 +71,8 @@ def plot_predictions(train_seq, title, nr_predictions, predictions, save_path, s
 
 def get_predictions(model, epoch, save_path, classifying, nr_steps=10000, starting_point=0, teacher_forcing=True):
     nr_predictions = min(nr_steps, dataset.val_length - starting_point - frame_size - 1)
-    channels = np.random.choice(dataset.nr_channels, 6)
-    trial = np.random.choice(dataset.trials_per_condition, 6)
-    movies = np.arange(1, 4)
-    movies = np.tile(movies, 2)
-    seqs_to_predict = zip(movies, trial, channels)
+    movies_concat = np.tile(movies, 2)
+    seqs_to_predict = zip(movies_concat, trial, channels)
 
     predictions = np.zeros(nr_predictions)
     position = 0
@@ -227,6 +224,13 @@ nr_val_steps = 1000  # np.ceil(0.1*dataset.get_total_length("VAL"))
 np.random.seed(42)
 
 print("Frame size is {}".format(frame_size))
+
+dataset = LFPDataset("/home/razpa/CER01A50/Bin_cer01a50-LFP.json", nr_bins=nr_bins)
+channels = np.random.choice(dataset.nr_channels, 6)
+trial = np.random.choice(dataset.trials_per_condition, 6)
+movies = np.arange(1, 4)
+
+now = datetime.datetime.now()
 model_name = "Wavenet_L:{}_Ep:{}_StpEp:{}_Lr:{}_BS:{}_Fltrs:{}_SkipFltrs:{}_FS:{}_{}_Clip:{}_Rnd:{}".format(nr_layers,
                                                                                                             n_epochs,
                                                                                                             nr_train_steps,
@@ -237,17 +241,9 @@ model_name = "Wavenet_L:{}_Ep:{}_StpEp:{}_Lr:{}_BS:{}_Fltrs:{}_SkipFltrs:{}_FS:{
                                                                                                             frame_shift,
                                                                                                             loss, clip,
                                                                                                             random)
-print(model_name)
-dataset = LFPDataset("/home/razpa/CER01A50/Bin_cer01a50-LFP.json", nr_bins=nr_bins)
-
-now = datetime.datetime.now()
 save_path = 'LFP_models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
+print(model_name)
 
 if __name__ == '__main__':
-    # channels = [0, 2, 4, 6, 8, 10, 12, 14, 16, 17, 22]
-    # movie = 3
-    # for trial in range(dataset.trials_per_condition):
-    #     for channel in channels:
-    #         dataset.plot_signal(movie, trial, channel, stop=3000, save=True)
     train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters=skip_conn_filters)
     test_model(save_path)
