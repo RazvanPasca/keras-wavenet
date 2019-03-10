@@ -1,72 +1,76 @@
 from timeit import default_timer as timer
 from datasets.LFPDataset import LFPDataset
+from datasets.DATASET_PATHS import MOUSE_DATASET_PATH
 import matplotlib.pyplot as plt
 import numpy as np
 
-DATASET_PATH = "/data2/gabir/DATASETS_AS_NPYs/M017_S001_SRCS3L_25,50,100_0002.npy"
-
 
 class MouseLFP(LFPDataset):
-    def __init__(self, train_perc=0.60, val_perc=0.20, test_perc=0.20, random_seed=42, nr_bins=256):
-        super().__init__(DATASET_PATH)
-
-        np.random.seed(42)
+    def __init__(self, val_perc=0.20, test_perc=0.20, random_seed=42, nr_bins=256):
+        super().__init__(MOUSE_DATASET_PATH)
+        np.random.seed(random_seed)
         self.random_seed = random_seed
-        self.nr_channels = len(self.channels)
         self.nr_bins = nr_bins
 
-        self.lfp_data = {1: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length)),
-                         2: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length)),
-                         3: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length))}
-        cur_element = [0, 0, 0, 0]
+        self._compute_values_range()
+        self._pre_compute_bins()
+        self._split_lfp_into_movies()
+        self._get_train_val_test_split(test_perc, val_perc)
 
+    def _compute_values_range(self):
+        min_val = np.min(self.channels)
+        max_val = np.max(self.channels)
+        self.values_range = min_val, max_val
+
+    def _split_lfp_into_movies(self):
+        self.all_lfp_data = {1: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length)),
+                             2: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length)),
+                             3: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length))}
+        cur_element = [0, 0, 0, 0]
         """Iterate over all channels and place them in the dictionary. A channel has length = trial_length"""
         for i in range(0, self.channels.shape[1] // self.trial_length):
             condition_number = self.stimulus_conditions[i]
-            self.lfp_data[condition_number][cur_element[condition_number], :, :] = self.channels[:,
-                                                                                   (i * self.trial_length):((
-                                                                                                                    i * self.trial_length) + self.trial_length)]
+            self.all_lfp_data[condition_number][cur_element[condition_number], :, :] = self.channels[:,
+                                                                                       (i * self.trial_length):((
+                                                                                                                        i * self.trial_length) + self.trial_length)]
             cur_element[condition_number] += 1
-        min_val = min(np.min(self.lfp_data[1]), np.min(self.lfp_data[2]), np.min(self.lfp_data[3]))
-        max_val = max(np.max(self.lfp_data[1]), np.max(self.lfp_data[2]), np.max(self.lfp_data[3]))
-        self.values_range = min_val, max_val
-        self._get_train_val_test_split(train_perc, test_perc, val_perc)
-        self._pre_compute_bins()
+        self.channels = None
 
     def _pre_compute_bins(self):
-        self.classes = {}
+        self.cached_val_bin = {}
         min_train_seq = np.floor(self.values_range[0])
         max_train_seq = np.ceil(self.values_range[1])
         self.bins = np.linspace(min_train_seq, max_train_seq, self.nr_bins)
         self.bin_size = self.bins[1] - self.bins[0]
-        print("Pre computing classes for the dataset")
-        start = timer()
-        for movie in self.lfp_data.values():
-            for value in movie.flatten():
-                self.classes[value] = self._encode_input_to_bin(value)
-        end = timer()
-        print("Time needed for pre computing classes", end - start)
+        # print("Pre computing classes for the dataset")
+        # start = timer()
+        # for channel in self.channels:
+        #     for v in channel:
+        #         self.cached_val_bin[v] = self._encode_input_to_bin(v)
+        # end = timer()
+        # print("Time needed for pre computing classes", end - start)
 
     def _encode_input_to_bin(self, target_val):
-        bin = np.searchsorted(self.bins, target_val, side='left')
-        return bin
+        if target_val not in self.cached_val_bin:
+            self.cached_val_bin[target_val] = np.digitize(target_val, self.bins, right=False)
+        return self.cached_val_bin[target_val]
 
-    def _get_train_val_test_split(self, train_perc, val_perc, test_perc, random=False):
-        self.train_length = round(train_perc * self.trial_length)
+    def _get_train_val_test_split(self, val_perc, test_perc, random=False):
         self.val_length = round(val_perc * self.trial_length)
         self.test_length = round(test_perc * self.trial_length)
+        self.train_length = self.trial_length - (self.val_length + self.test_length)
         if not random:
-            self.train = {1: self.lfp_data[1][:, :, :self.train_length],
-                          2: self.lfp_data[2][:, :, :self.train_length],
-                          3: self.lfp_data[3][:, :, :self.train_length]}
-            self.validation = {1: self.lfp_data[1][:, :, self.train_length:self.train_length + self.val_length],
-                               2: self.lfp_data[2][:, :, self.train_length:self.train_length + self.val_length],
-                               3: self.lfp_data[3][:, :, self.train_length:self.train_length + self.val_length]}
-            self.test = {1: self.lfp_data[1][:, :,
+            self.train = {1: self.all_lfp_data[1][:, :, :self.train_length],
+                          2: self.all_lfp_data[2][:, :, :self.train_length],
+                          3: self.all_lfp_data[3][:, :, :self.train_length]}
+            self.validation = {1: self.all_lfp_data[1][:, :, self.train_length:self.train_length + self.val_length],
+                               2: self.all_lfp_data[2][:, :, self.train_length:self.train_length + self.val_length],
+                               3: self.all_lfp_data[3][:, :, self.train_length:self.train_length + self.val_length]}
+            self.test = {1: self.all_lfp_data[1][:, :,
                             self.train_length + self.val_length:self.train_length + self.val_length + self.test_length],
-                         2: self.lfp_data[2][:, :,
+                         2: self.all_lfp_data[2][:, :,
                             self.train_length + self.val_length:self.train_length + self.val_length + self.test_length],
-                         3: self.lfp_data[3][:, :,
+                         3: self.all_lfp_data[3][:, :,
                             self.train_length + self.val_length:self.train_length + self.val_length + self.test_length]}
 
     def train_frame_generator(self, frame_size, batch_size, classifying):
@@ -80,7 +84,7 @@ class MouseLFP(LFPDataset):
             frame = self.train[movie_index][trial_index, channel_index, batch_start:batch_start + frame_size]
             next_step_value = self.train[movie_index][trial_index, channel_index, batch_start + frame_size]
             x.append(frame.reshape(frame_size, 1))
-            y.append(self.classes[next_step_value] if classifying else next_step_value)
+            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
             if len(x) == batch_size:
                 yield np.array(x), np.array(y)
                 x = []
@@ -97,7 +101,7 @@ class MouseLFP(LFPDataset):
             frame = self.validation[movie_index][trial_index, channel_index, batch_start:batch_start + frame_size]
             next_step_value = self.validation[movie_index][trial_index, channel_index, batch_start + frame_size]
             x.append(frame.reshape(frame_size, 1))
-            y.append(self.classes[next_step_value] if classifying else next_step_value)
+            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
             if len(x) == batch_size:
                 yield np.array(x), np.array(y)
                 x = []
@@ -112,9 +116,9 @@ class MouseLFP(LFPDataset):
             trial_index = batch_start % self.trials_per_condition
             channel_index = batch_start % self.nr_channels
             frame = self.test[movie_index][trial_index, channel_index, batch_start:batch_start + frame_size]
-            temp = self.test[movie_index][trial_index, channel_index, batch_start + frame_size]
+            next_step_value = self.test[movie_index][trial_index, channel_index, batch_start + frame_size]
             x.append(frame.reshape(frame_size, 1))
-            y.append(self.classes[temp] if classifying else temp)
+            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
             if len(x) == batch_size:
                 yield np.array(x), np.array(y)
                 x = []
@@ -135,7 +139,7 @@ class MouseLFP(LFPDataset):
             plt.show()
 
     def get_dataset_piece(self, movie, trial, channel):
-        return self.lfp_data[movie][trial, channel, :]
+        return self.all_lfp_data[movie][trial, channel, :]
 
     def get_total_length(self, partition):
         if partition == "TRAIN":
@@ -146,8 +150,3 @@ class MouseLFP(LFPDataset):
             return self.test[1].size + self.test[2].size + self.test[3].size
         else:
             raise ValueError("Please pick a valid partition from: TRAIN, VAL and TEST")
-
-
-if __name__ == '__main__':
-    dataset = MouseLFP()
-    print(dataset.channels)

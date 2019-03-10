@@ -1,14 +1,13 @@
 # from timeit import default_timer as timer
 from datasets.LFPDataset import LFPDataset
+from datasets.DATASET_PATHS import CAT_DATASET_PATH
 import matplotlib.pyplot as plt
 import numpy as np
-
-DATASET_PATH = "/data2/gabir/DATASETS_AS_NPYs/cer01a50.npy"
 
 
 class CatLFP(LFPDataset):
     def __init__(self, val_perc=0.20, test_perc=0.20, random_seed=42, nr_bins=256):
-        super().__init__(DATASET_PATH)
+        super().__init__(CAT_DATASET_PATH)
         np.random.seed(random_seed)
         self.random_seed = random_seed
         self.nr_bins = nr_bins
