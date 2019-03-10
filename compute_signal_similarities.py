@@ -2,9 +2,9 @@ from itertools import product
 
 import numpy as np
 
-from LFP_Dataset import LFPDataset
+from datasets.CatLFP import CatLFP
 
-dataset = LFPDataset("/home/razpa/CER01A50/Bin_cer01a50-LFP.json")
+dataset = CatLFP()
 
 
 def rmse(a, b):

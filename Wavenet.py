@@ -1,23 +1,21 @@
 import os
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-import datetime
-from textwrap import wrap
-
-import matplotlib.pyplot as plt
-import numpy as np
 from keras import losses, optimizers, callbacks
 from keras.activations import softmax
 from keras.callbacks import TensorBoard, CSVLogger
 from keras.layers import Flatten, Dense, \
     Input, Activation, Conv1D, Add, Multiply
 from keras.models import Model, load_model
-
-from LFP_Dataset import LFPDataset
-
+from datasets.CatLFP import CatLFP
 from keras.backend.tensorflow_backend import set_session
+from textwrap import wrap
+
+import datetime
+import matplotlib.pyplot as plt
+import numpy as np
 import tensorflow as tf
 
 config = tf.ConfigProto()
@@ -225,7 +223,7 @@ np.random.seed(42)
 
 print("Frame size is {}".format(frame_size))
 
-dataset = LFPDataset("/home/razpa/CER01A50/Bin_cer01a50-LFP.json", nr_bins=nr_bins)
+dataset = CatLFP(nr_bins=nr_bins)
 channels = np.random.choice(dataset.nr_channels, 6)
 trial = np.random.choice(dataset.trials_per_condition, 6)
 movies = np.arange(1, 4)
