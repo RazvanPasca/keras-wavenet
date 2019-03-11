@@ -1,5 +1,7 @@
 import os
 
+from keras.regularizers import l2
+
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -65,6 +67,7 @@ def plot_predictions(train_seq, title, nr_predictions, predictions, save_path, s
     plt.legend()
     plt.savefig(save_path + '/' + str(title) + "TF:" + str(teacher_forcing) + ".png")
     plt.show()
+    plt.close()
 
 
 def get_predictions(model, epoch, save_path, classifying, nr_steps=10000, starting_point=0, teacher_forcing=True):
@@ -96,22 +99,26 @@ def get_predictions(model, epoch, save_path, classifying, nr_steps=10000, starti
         position = 0
 
 
-def wavenet_block(n_filters, filter_size, dilation_rate):
+def wavenet_block(n_filters, filter_size, dilation_rate, regularization_coef):
     def f(input_):
         residual = input_
         tanh_out = Conv1D(n_filters, filter_size,
                           dilation_rate=dilation_rate,
                           padding='causal',
-                          activation='tanh')(input_)
+                          activation='tanh',
+                          kernel_regularizer=l2(regularization_coef))(input_)
         sigmoid_out = Conv1D(n_filters, filter_size,
                              dilation_rate=dilation_rate,
                              padding='causal',
-                             activation='sigmoid')(input_)
+                             activation='sigmoid',
+                             kernel_regularizer=l2(regularization_coef))(input_)
 
         merged = Multiply()([tanh_out, sigmoid_out])
-        skip_out = Conv1D(n_filters * 2, 1, padding='same')(merged)
+        skip_out = Conv1D(n_filters * 2, 1, padding='same',
+                          kernel_regularizer=l2(regularization_coef))(merged)
 
-        out = Conv1D(n_filters, 1, padding='same')(merged)
+        out = Conv1D(n_filters, 1, padding='same',
+                     kernel_regularizer=l2(regularization_coef))(merged)
         full_out = Add(name="Block_{}_Out".format(dilation_rate))([out, residual])
         return full_out, skip_out
 
@@ -119,7 +126,7 @@ def wavenet_block(n_filters, filter_size, dilation_rate):
 
 
 def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clipping, skip_conn_filters,
-                               output_size=256):
+                               output_size=256, regularization_coef=0.001):
     if loss is "MSE":
         model_loss = losses.MSE
     elif loss is "MAE":
@@ -135,27 +142,28 @@ def get_basic_generative_model(nr_filters, input_size, nr_layers, lr, loss, clip
         clipvalue = 20
 
     input_ = Input(shape=(input_size, 1))
-    A, B = wavenet_block(nr_filters, 2, 1)(input_)
+    A, B = wavenet_block(nr_filters, 2, 1, regularization_coef=regularization_coef)(input_)
     skip_connections = [B]
     for i in range(1, nr_layers):
         dilation_rate = 2 ** i
-        A, B = wavenet_block(nr_filters, 2, dilation_rate)(A)
+        A, B = wavenet_block(nr_filters, 2, dilation_rate, regularization_coef=regularization_coef)(A)
         skip_connections.append(B)
     net = Add()(skip_connections)
     net = Activation('relu')(net)
-    net = Conv1D(skip_conn_filters, 1, activation='relu')(net)
-    net = Conv1D(skip_conn_filters, 1)(net)
+    net = Conv1D(skip_conn_filters, 1, activation='relu', kernel_regularizer=l2(regularization_coef))(net)
+    net = Conv1D(skip_conn_filters, 1, kernel_regularizer=l2(regularization_coef))(net)
     net = Flatten()(net)
 
     if model_loss is losses.sparse_categorical_crossentropy:
-        net = Dense(output_size, activation=softmax, name="Model_Output")(net)
+        net = Dense(output_size, activation=softmax, name="Model_Output", kernel_regularizer=l2(regularization_coef))(
+            net)
     else:
-        net = Dense(1, name="Model_Output")(net)
+        net = Dense(1, name="Model_Output", kernel_regularizer=l2(regularization_coef))(net)
 
     model = Model(inputs=input_, outputs=net)
     optimizer = optimizers.adam(lr=lr, clipvalue=clipvalue)
     model.compile(loss=model_loss, optimizer=optimizer)
-    model.summary()
+    # model.summary()
     return model
 
 
@@ -167,12 +175,12 @@ def decode_model_output(model_logits, classifying):
     return model_logits
 
 
-def train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters):
+def train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters, regularization_coef):
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
     model = get_basic_generative_model(nr_filters, frame_size, nr_layers, lr=lr, loss=loss, clipping=clip,
-                                       skip_conn_filters=skip_conn_filters)
+                                       skip_conn_filters=skip_conn_filters, regularization_coef=regularization_coef)
 
     print('Total training steps:', nr_train_steps)
     print('Total validation steps:', nr_val_steps)
@@ -209,16 +217,17 @@ n_epochs = 50
 batch_size = 32
 nr_layers = 8
 frame_size = 2 ** nr_layers
-nr_filters = 32
+nr_filters = 16
 frame_shift = 8
 lr = 0.00001
 loss = 'CAT'
 clip = True
 random = True
 nr_bins = 256
-skip_conn_filters = 64
-nr_train_steps = 1850  # dataset.get_total_length("TRAIN") // batch_size // 400
-nr_val_steps = 1000  # np.ceil(0.1*dataset.get_total_length("VAL"))
+skip_conn_filters = 32
+regularization_coef = 0.0001
+nr_train_steps = 3600  # dataset.get_total_length("TRAIN") // batch_size // 400
+nr_val_steps = 2000  # np.ceil(0.1*dataset.get_total_length("VAL"))
 np.random.seed(42)
 
 print("Frame size is {}".format(frame_size))
@@ -229,19 +238,23 @@ trial = np.random.choice(dataset.trials_per_condition, 6)
 movies = np.arange(1, 4)
 
 now = datetime.datetime.now()
-model_name = "Wavenet_L:{}_Ep:{}_StpEp:{}_Lr:{}_BS:{}_Fltrs:{}_SkipFltrs:{}_FS:{}_{}_Clip:{}_Rnd:{}".format(nr_layers,
-                                                                                                            n_epochs,
-                                                                                                            nr_train_steps,
-                                                                                                            lr,
-                                                                                                            batch_size,
-                                                                                                            nr_filters,
-                                                                                                            skip_conn_filters,
-                                                                                                            frame_shift,
-                                                                                                            loss, clip,
-                                                                                                            random)
-save_path = 'LFP_models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
+model_name = "Wavenet_L:{}_Ep:{}_StpEp:{}_Lr:{}_BS:{}_Fltrs:{}_SkipFltrs:{}_L2:{}_FS:{}_{}_Clip:{}_Rnd:{}".format(
+    nr_layers,
+    n_epochs,
+    nr_train_steps,
+    lr,
+    batch_size,
+    nr_filters,
+    skip_conn_filters,
+    regularization_coef,
+    frame_shift,
+    loss, clip,
+    random)
+save_path = '/data2/razpa/LFP_models/' + model_name + '/' + now.strftime("%Y-%m-%d %H:%M")
 print(model_name)
 
 if __name__ == '__main__':
-    train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters=skip_conn_filters)
+    train_model(nr_train_steps, nr_val_steps, clip, random, save_path, skip_conn_filters=skip_conn_filters,
+                regularization_coef=regularization_coef)
     test_model(save_path)
+
