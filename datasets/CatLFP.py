@@ -67,9 +67,10 @@ class CatLFP(LFPDataset):
         x = []
         y = []
         while 1:
-            random_sequence, _ = self.get_random_sequence(data, frame_size + 1)
-            frame = random_sequence[:-1]
-            next_step_value = random_sequence[-1]
+            batch_start = np.random.choice(range(0, data.shape[-1] - frame_size))
+            random_sequence, _ = self.get_random_sequence(data)
+            frame = random_sequence[batch_start:batch_start + frame_size]
+            next_step_value = random_sequence[batch_start + frame_size]
             x.append(frame.reshape(frame_size, 1))
             y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
             if len(x) == batch_size:
@@ -87,7 +88,7 @@ class CatLFP(LFPDataset):
         return self.frame_generator(frame_size, batch_size, classifying, self.test)
 
     def get_dataset_piece(self, movie, trial, channel):
-        return self.all_lfp_data[movie][trial, channel, :]
+        return self.all_lfp_data[movie, trial, channel, :]
 
     def plot_signal(self, movie, trial, channel, start=0, stop=None, save=False, show=True):
         if stop is None:
@@ -95,7 +96,8 @@ class CatLFP(LFPDataset):
         plt.figure(figsize=(16, 12))
         plot_title = "Movie:{}_Channel:{}_Trial:{}_Start:{}_Stop:{}".format(movie, channel, trial, start, stop)
         plt.title(plot_title)
-        plt.plot(self.get_dataset_piece(movie, trial, channel)[start:stop], label="LFP signal")
+        signal = self.get_dataset_piece(movie, trial, channel)[start:stop]
+        plt.plot(signal, label="LFP signal")
         plt.legend()
         if save:
             plt.savefig(
@@ -105,23 +107,31 @@ class CatLFP(LFPDataset):
 
     def get_random_sequence_from(self, source='VAL'):
         if source == 'TRAIN':
-            data, data_addr = self.get_random_sequence(self.train, self.train.shape[-1])
+            data_source = self.train
         elif source == 'VAL':
-            data, data_addr = self.get_random_sequence(self.validation, self.validation.shape[-1])
+            data_source = self.validation
         elif source == 'TEST':
-            data, data_addr = self.get_random_sequence(self.test, self.test.shape[-1])
-        data_addr['SOURCE'] = source
-        return data, data_addr
+            data_source = self.test
+        else:
+            raise ValueError("Please pick one out of TRAIN, VAL, TEST as data source")
 
-    def get_random_sequence(self, data, seq_length):
-        batch_start = np.random.choice(range(0, data.shape[-1] - seq_length + 1))
+        sequence, sequence_addr = self.get_random_sequence(data_source)
+        sequence_addr['SOURCE'] = source
+        return sequence, sequence_addr
+
+    def get_random_sequence(self, data_source):
+        channel_index = np.random.choice(self.nr_channels)
+        movie_index = np.random.choice(self.number_of_conditions)
+        trial_index = np.random.choice(self.trials_per_condition)
+        return self.get_sequence(movie_index, trial_index, channel_index, data_source)
+
+    def get_sequence(self, movie_index, trial_index, channel_index, data_source):
         data_address = {
-            'M': batch_start % self.number_of_conditions,
-            'T': batch_start % self.trials_per_condition,
-            'C': batch_start % self.nr_channels
+            'M': movie_index,
+            'T': trial_index,
+            'C': channel_index
         }
-        return data[data_address['M'], data_address['T'], data_address['C'],
-               batch_start:batch_start + seq_length], data_address
+        return data_source[data_address['M'], data_address['T'], data_address['C'], :], data_address
 
 
 if __name__ == '__main__':

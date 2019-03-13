@@ -2,7 +2,7 @@ from keras.backend.tensorflow_backend import set_session
 from keras.callbacks import TensorBoard, CSVLogger
 from keras.models import load_model
 from plot_utils import PlotCallback, get_predictions
-from trainig_parameters import ModelTrainingParameters
+from training_parameters import ModelTrainingParameters
 from wavenet_model import get_basic_generative_model
 import os
 import tensorflow as tf
@@ -14,10 +14,13 @@ def configure_gpu(gpu):
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
+    sess = tf.Session(config=config)
+    set_session(sess)
 
 
 def train_model(model_params):
     log_training_session(model_parameters)
+
     if not os.path.exists(model_params.get_save_path()):
         os.makedirs(model_params.get_save_path())
 
@@ -29,10 +32,11 @@ def train_model(model_params):
                                        clipping=model_params.clip,
                                        skip_conn_filters=model_params.skip_conn_filters,
                                        regularization_coef=model_params.regularization_coef)
+
     tensor_board_callback = TensorBoard(log_dir=model_params.get_save_path(),
                                         write_graph=True)
     log_callback = CSVLogger(model_params.get_save_path() + "/session_log.csv")
-    plot_figure_callback = PlotCallback(model_params, 1, nr_predictions_steps=500)
+    plot_figure_callback = PlotCallback(model_params, 1, nr_predictions_steps=2000)
 
     model.fit_generator(
         model_params.dataset.train_frame_generator(model_params.frame_size,
@@ -67,9 +71,6 @@ def log_training_session(model_params):
 
 if __name__ == '__main__':
     configure_gpu(0)
-
-    sess = tf.Session(config=config)
-    set_session(sess)
 
     model_parameters = ModelTrainingParameters()
 
