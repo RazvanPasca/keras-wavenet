@@ -98,3 +98,4 @@ ENV/
 
 tmp/*
 .vs/*
+datasets/DATASET_PATHS.py

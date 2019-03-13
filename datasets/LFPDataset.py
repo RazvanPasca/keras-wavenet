@@ -11,7 +11,7 @@ class LFPDataset:
         if saved_as_npy:
             self.load_from_npy(dataset_path)
         else:
-            lfp_file_data = LFPDataset.load_from_npy(dataset_path)
+            lfp_file_data = LFPDataset._parse_description(dataset_path)
             self.bin_file_names = lfp_file_data.get('bin_file_names')
             self.trial_length = lfp_file_data.get('trial_length')
             self.total_length = lfp_file_data.get('total_length')
@@ -92,3 +92,18 @@ class LFPDataset:
         with open(description_file_path, 'r') as f:
             lfp_description = json.loads(f.read())
         return lfp_description
+
+    def get_total_length(self, partition):
+        if partition == "TRAIN":
+            return self.train.size
+        elif partition == "VAL":
+            return self.validation.size
+        elif partition == "TEST":
+            return self.test.size
+        else:
+            raise ValueError("Please pick a valid partition from: TRAIN, VAL and TEST")
+
+    def _compute_values_range(self):
+        min_val = np.min(self.channels)
+        max_val = np.max(self.channels)
+        self.values_range = min_val, max_val

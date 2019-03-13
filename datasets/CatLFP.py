@@ -6,10 +6,8 @@ import numpy as np
 
 
 class CatLFP(LFPDataset):
-    def __init__(self, val_perc=0.20, test_perc=0.20, random_seed=42, nr_bins=256):
+    def __init__(self, val_perc=0.20, test_perc=0.20, random_seed=42, nr_bins=256, nr_of_seqs=3):
         super().__init__(CAT_DATASET_PATH)
-        np.random.seed(random_seed)
-        self.random_seed = random_seed
         self.nr_bins = nr_bins
 
         self._compute_values_range()
@@ -17,23 +15,23 @@ class CatLFP(LFPDataset):
         self._split_lfp_into_movies()
         self._get_train_val_test_split(test_perc, val_perc)
 
-    def _compute_values_range(self):
-        min_val = np.min(self.channels)
-        max_val = np.max(self.channels)
-        self.values_range = min_val, max_val
+        np.random.seed(random_seed)
+        self.random_seed = random_seed
+        self.prediction_sequences = {
+            'val': [self.get_random_sequence_from('VAL') for _ in range(nr_of_seqs)],
+            'train': [self.get_random_sequence_from('TRAIN') for _ in range(nr_of_seqs)]
+        }
 
     def _split_lfp_into_movies(self):
-        self.all_lfp_data = {1: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length)),
-                             2: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length)),
-                             3: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length))}
-        cur_element = [0, 0, 0, 0]
-        """Iterate over all channels and place them in the dictionary. A channel has length = trial_length"""
-        for i in range(0, self.channels.shape[1] // self.trial_length):
-            condition_number = self.stimulus_conditions[i]
-            self.all_lfp_data[condition_number][cur_element[condition_number], :, :] = self.channels[:,
-                                                                                       (i * self.trial_length):((
-                                                                                                                        i * self.trial_length) + self.trial_length)]
-            cur_element[condition_number] += 1
+        self.all_lfp_data = []
+        for condition_id in range(0, self.number_of_conditions):
+            condition = []
+            for i in range(0, self.channels.shape[1] // self.trial_length):
+                if self.stimulus_conditions[i] == condition_id + 1:
+                    trial = self.channels[:, (i * self.trial_length):((i * self.trial_length) + self.trial_length)]
+                    condition.append(trial)
+            self.all_lfp_data.append(np.array(condition))
+        self.all_lfp_data = np.array(self.all_lfp_data)
         self.channels = None
 
     def _pre_compute_bins(self):
@@ -60,69 +58,36 @@ class CatLFP(LFPDataset):
         self.test_length = round(test_perc * self.trial_length)
         self.train_length = self.trial_length - (self.val_length + self.test_length)
         if not random:
-            self.train = {1: self.all_lfp_data[1][:, :, :self.train_length],
-                          2: self.all_lfp_data[2][:, :, :self.train_length],
-                          3: self.all_lfp_data[3][:, :, :self.train_length]}
-            self.validation = {1: self.all_lfp_data[1][:, :, self.train_length:self.train_length + self.val_length],
-                               2: self.all_lfp_data[2][:, :, self.train_length:self.train_length + self.val_length],
-                               3: self.all_lfp_data[3][:, :, self.train_length:self.train_length + self.val_length]}
-            self.test = {1: self.all_lfp_data[1][:, :,
-                            self.train_length + self.val_length:self.train_length + self.val_length + self.test_length],
-                         2: self.all_lfp_data[2][:, :,
-                            self.train_length + self.val_length:self.train_length + self.val_length + self.test_length],
-                         3: self.all_lfp_data[3][:, :,
-                            self.train_length + self.val_length:self.train_length + self.val_length + self.test_length]}
+            self.train = self.all_lfp_data[:, :, :, :self.train_length]
+            self.validation = self.all_lfp_data[:, :, :, self.train_length:self.train_length + self.val_length]
+            self.test = self.all_lfp_data[:, :, :,
+                        self.train_length + self.val_length:self.train_length + self.val_length + self.test_length]
+
+    def frame_generator(self, frame_size, batch_size, classifying, data):
+        x = []
+        y = []
+        while 1:
+            random_sequence, _ = self.get_random_sequence(data, frame_size + 1)
+            frame = random_sequence[:-1]
+            next_step_value = random_sequence[-1]
+            x.append(frame.reshape(frame_size, 1))
+            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
+            if len(x) == batch_size:
+                yield np.array(x), np.array(y)
+                x = []
+                y = []
 
     def train_frame_generator(self, frame_size, batch_size, classifying):
-        x = []
-        y = []
-        while 1:
-            batch_start = np.random.choice(range(0, self.train_length - frame_size - 1))
-            movie_index = batch_start % self.number_of_conditions + 1
-            trial_index = batch_start % self.trials_per_condition
-            channel_index = batch_start % self.nr_channels
-            frame = self.train[movie_index][trial_index, channel_index, batch_start:batch_start + frame_size]
-            next_step_value = self.train[movie_index][trial_index, channel_index, batch_start + frame_size]
-            x.append(frame.reshape(frame_size, 1))
-            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
-            if len(x) == batch_size:
-                yield np.array(x), np.array(y)
-                x = []
-                y = []
+        return self.frame_generator(frame_size, batch_size, classifying, self.train)
 
     def validation_frame_generator(self, frame_size, batch_size, classifying):
-        x = []
-        y = []
-        while 1:
-            batch_start = np.random.choice(range(0, self.val_length - frame_size - 1))
-            movie_index = batch_start % self.number_of_conditions + 1
-            trial_index = batch_start % self.trials_per_condition
-            channel_index = batch_start % self.nr_channels
-            frame = self.validation[movie_index][trial_index, channel_index, batch_start:batch_start + frame_size]
-            next_step_value = self.validation[movie_index][trial_index, channel_index, batch_start + frame_size]
-            x.append(frame.reshape(frame_size, 1))
-            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
-            if len(x) == batch_size:
-                yield np.array(x), np.array(y)
-                x = []
-                y = []
+        return self.frame_generator(frame_size, batch_size, classifying, self.validation)
 
     def test_frame_generator(self, frame_size, batch_size, classifying):
-        x = []
-        y = []
-        while 1:
-            batch_start = np.random.choice(range(0, self.test_length - frame_size - 1))
-            movie_index = batch_start % self.number_of_conditions + 1
-            trial_index = batch_start % self.trials_per_condition
-            channel_index = batch_start % self.nr_channels
-            frame = self.test[movie_index][trial_index, channel_index, batch_start:batch_start + frame_size]
-            next_step_value = self.test[movie_index][trial_index, channel_index, batch_start + frame_size]
-            x.append(frame.reshape(frame_size, 1))
-            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
-            if len(x) == batch_size:
-                yield np.array(x), np.array(y)
-                x = []
-                y = []
+        return self.frame_generator(frame_size, batch_size, classifying, self.test)
+
+    def get_dataset_piece(self, movie, trial, channel):
+        return self.all_lfp_data[movie][trial, channel, :]
 
     def plot_signal(self, movie, trial, channel, start=0, stop=None, save=False, show=True):
         if stop is None:
@@ -138,21 +103,27 @@ class CatLFP(LFPDataset):
         if show:
             plt.show()
 
-    def get_dataset_piece(self, movie, trial, channel):
-        return self.all_lfp_data[movie][trial, channel, :]
+    def get_random_sequence_from(self, source='VAL'):
+        if source == 'TRAIN':
+            data, data_addr = self.get_random_sequence(self.train, self.train.shape[-1])
+        elif source == 'VAL':
+            data, data_addr = self.get_random_sequence(self.validation, self.validation.shape[-1])
+        elif source == 'TEST':
+            data, data_addr = self.get_random_sequence(self.test, self.test.shape[-1])
+        data_addr['SOURCE'] = source
+        return data, data_addr
 
-    def get_total_length(self, partition):
-        if partition == "TRAIN":
-            return self.train[1].size + self.train[2].size + self.train[3].size
-        elif partition == "VAL":
-            return self.validation[1].size + self.validation[2].size + self.validation[3].size
-        elif partition == "TEST":
-            return self.test[1].size + self.test[2].size + self.test[3].size
-        else:
-            raise ValueError("Please pick a valid partition from: TRAIN, VAL and TEST")
+    def get_random_sequence(self, data, seq_length):
+        batch_start = np.random.choice(range(0, data.shape[-1] - seq_length + 1))
+        data_address = {
+            'M': batch_start % self.number_of_conditions,
+            'T': batch_start % self.trials_per_condition,
+            'C': batch_start % self.nr_channels
+        }
+        return data[data_address['M'], data_address['T'], data_address['C'],
+               batch_start:batch_start + seq_length], data_address
 
 
 if __name__ == '__main__':
     dataset = CatLFP()
-    print(dataset.channels)
-    dataset.save_as_npy('./cer01a50.npy')
+    print(dataset.all_lfp_data.shape)

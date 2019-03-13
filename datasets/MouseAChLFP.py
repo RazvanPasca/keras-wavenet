@@ -6,15 +6,20 @@ import numpy as np
 
 
 class MouseAChLFP(LFPDataset):
-    def __init__(self, val_perc=0.20, test_perc=0.20, random_seed=42, nr_bins=256):
+    def __init__(self, val_perc=0.20, test_perc=0.20, random_seed=42, nr_bins=256, channels_to_consider=None):
         super().__init__(MOUSEACH_DATASET_PATH)
         np.random.seed(random_seed)
+        self.channels = self.channels[:-1]  # Discard channel 33 which records heart beats
+        if channels_to_consider is not None:
+            self.channels = self.channels[np.array(channels_to_consider)]
         self.random_seed = random_seed
         self.nr_bins = nr_bins
-
+        self.nr_of_orientations = 8
+        self.nr_of_stimulus_luminosity_levels = 3
+        self.trial_length = 2672 #4175
         self._compute_values_range()
         self._pre_compute_bins()
-        self._split_lfp_into_movies()
+        self._split_lfp_data()
         self._get_train_val_test_split(test_perc, val_perc)
 
     def _compute_values_range(self):
@@ -22,18 +27,27 @@ class MouseAChLFP(LFPDataset):
         max_val = np.max(self.channels)
         self.values_range = min_val, max_val
 
-    def _split_lfp_into_movies(self):
-        self.all_lfp_data = {1: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length)),
-                             2: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length)),
-                             3: np.zeros((self.trials_per_condition, self.number_of_lfp_files, self.trial_length))}
-        cur_element = [0, 0, 0, 0]
-        """Iterate over all channels and place them in the dictionary. A channel has length = trial_length"""
-        for i in range(0, self.channels.shape[1] // self.trial_length):
-            condition_number = self.stimulus_conditions[i]
-            self.all_lfp_data[condition_number][cur_element[condition_number], :, :] = self.channels[:,
-                                                                                       (i * self.trial_length):((
-                                                                                                                        i * self.trial_length) + self.trial_length)]
-            cur_element[condition_number] += 1
+    def _split_lfp_data(self):
+        self.all_lfp_data = []
+        for orientation in range(1, self.nr_of_orientations + 1):
+            intensity = []
+            for intensity_id in range(1, self.nr_of_stimulus_luminosity_levels + 1):
+                condition = []
+                condition_id = orientation * intensity_id
+                for stimulus_condition in self.stimulus_conditions:
+                    if stimulus_condition['Condition number'] == str(condition_id):
+                        index = int(stimulus_condition['Trial'])
+                        events = [{'timestamp': self.event_timestamps[4 * index + i],
+                                   'code': self.event_codes[4 * index + i]} for i in range(4)]
+                        trial = self.channels[:, events[1]['timestamp']:(events[1]['timestamp'] + 2672)]
+                        # Right now it cuts only the area where the stimulus is active
+                        # In order to keep the whole trial replace with
+                        # "trial = self.channels[:, events[0]['timestamp']:(events[0]['timestamp'] + 4175)]"
+                        condition.append(trial)
+                condition = np.array(condition)
+                intensity.append(condition)
+            self.all_lfp_data.append(intensity)
+        self.all_lfp_data = np.array(self.all_lfp_data)
         self.channels = None
 
     def _pre_compute_bins(self):
@@ -60,98 +74,61 @@ class MouseAChLFP(LFPDataset):
         self.test_length = round(test_perc * self.trial_length)
         self.train_length = self.trial_length - (self.val_length + self.test_length)
         if not random:
-            self.train = {1: self.all_lfp_data[1][:, :, :self.train_length],
-                          2: self.all_lfp_data[2][:, :, :self.train_length],
-                          3: self.all_lfp_data[3][:, :, :self.train_length]}
-            self.validation = {1: self.all_lfp_data[1][:, :, self.train_length:self.train_length + self.val_length],
-                               2: self.all_lfp_data[2][:, :, self.train_length:self.train_length + self.val_length],
-                               3: self.all_lfp_data[3][:, :, self.train_length:self.train_length + self.val_length]}
-            self.test = {1: self.all_lfp_data[1][:, :,
-                            self.train_length + self.val_length:self.train_length + self.val_length + self.test_length],
-                         2: self.all_lfp_data[2][:, :,
-                            self.train_length + self.val_length:self.train_length + self.val_length + self.test_length],
-                         3: self.all_lfp_data[3][:, :,
-                            self.train_length + self.val_length:self.train_length + self.val_length + self.test_length]}
+            self.train = self.all_lfp_data[:, :, :, :, :self.train_length]
+            self.validation = self.all_lfp_data[:, :, :, :, self.train_length:self.train_length + self.val_length]
+            self.test = self.all_lfp_data[:, :, :, :,
+                        self.train_length + self.val_length:self.train_length + self.val_length + self.test_length]
+
+    def frame_generator(self, frame_size, batch_size, classifying, length, data):
+        x = []
+        y = []
+        while 1:
+            batch_start = np.random.choice(range(0, length - frame_size - 1))
+            orientation_index = batch_start % self.nr_of_orientations
+            luminosity_index = batch_start % self.nr_of_stimulus_luminosity_levels
+            trial_index = batch_start % self.trials_per_condition
+            channel_index = batch_start % self.nr_channels
+            frame = data[orientation_index, luminosity_index, trial_index, channel_index,
+                    batch_start:batch_start + frame_size]
+            next_step_value = data[
+                orientation_index, luminosity_index, trial_index, channel_index, batch_start + frame_size]
+            x.append(frame.reshape(frame_size, 1))
+            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
+            if len(x) == batch_size:
+                yield np.array(x), np.array(y)
+                x = []
+                y = []
 
     def train_frame_generator(self, frame_size, batch_size, classifying):
-        x = []
-        y = []
-        while 1:
-            batch_start = np.random.choice(range(0, self.train_length - frame_size - 1))
-            movie_index = batch_start % self.number_of_conditions + 1
-            trial_index = batch_start % self.trials_per_condition
-            channel_index = batch_start % self.nr_channels
-            frame = self.train[movie_index][trial_index, channel_index, batch_start:batch_start + frame_size]
-            next_step_value = self.train[movie_index][trial_index, channel_index, batch_start + frame_size]
-            x.append(frame.reshape(frame_size, 1))
-            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
-            if len(x) == batch_size:
-                yield np.array(x), np.array(y)
-                x = []
-                y = []
+        return self.frame_generator(frame_size, batch_size, classifying, self.trial_length, self.train)
 
     def validation_frame_generator(self, frame_size, batch_size, classifying):
-        x = []
-        y = []
-        while 1:
-            batch_start = np.random.choice(range(0, self.val_length - frame_size - 1))
-            movie_index = batch_start % self.number_of_conditions + 1
-            trial_index = batch_start % self.trials_per_condition
-            channel_index = batch_start % self.nr_channels
-            frame = self.validation[movie_index][trial_index, channel_index, batch_start:batch_start + frame_size]
-            next_step_value = self.validation[movie_index][trial_index, channel_index, batch_start + frame_size]
-            x.append(frame.reshape(frame_size, 1))
-            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
-            if len(x) == batch_size:
-                yield np.array(x), np.array(y)
-                x = []
-                y = []
+        return self.frame_generator(frame_size, batch_size, classifying, self.val_length, self.validation)
 
     def test_frame_generator(self, frame_size, batch_size, classifying):
-        x = []
-        y = []
-        while 1:
-            batch_start = np.random.choice(range(0, self.test_length - frame_size - 1))
-            movie_index = batch_start % self.number_of_conditions + 1
-            trial_index = batch_start % self.trials_per_condition
-            channel_index = batch_start % self.nr_channels
-            frame = self.test[movie_index][trial_index, channel_index, batch_start:batch_start + frame_size]
-            next_step_value = self.test[movie_index][trial_index, channel_index, batch_start + frame_size]
-            x.append(frame.reshape(frame_size, 1))
-            y.append(self._encode_input_to_bin(next_step_value) if classifying else next_step_value)
-            if len(x) == batch_size:
-                yield np.array(x), np.array(y)
-                x = []
-                y = []
+        return self.frame_generator(frame_size, batch_size, classifying, self.test_length, self.test)
 
-    def plot_signal(self, movie, trial, channel, start=0, stop=None, save=False, show=True):
+    def get_dataset_piece(self, orientation, luminosity, trial, channel):
+        return self.all_lfp_data[orientation, luminosity, trial, channel, :]
+
+    def plot_signal(self, orientation, luminosity, trial, channel, start=0, stop=None, save=False, show=True):
         if stop is None:
             stop = self.trial_length
         plt.figure(figsize=(16, 12))
-        plot_title = "Movie:{}_Channel:{}_Trial:{}_Start:{}_Stop:{}".format(movie, channel, trial, start, stop)
+        plot_title = "Orientation:{}_Luminosity:{}_Channel:{}_Trial:{}_Start:{}_Stop:{}".format(orientation, luminosity,
+                                                                                                channel, trial, start,
+                                                                                                stop)
         plt.title(plot_title)
-        plt.plot(self.get_dataset_piece(movie, trial, channel)[start:stop], label="LFP signal")
+        plt.plot(self.get_dataset_piece(orientation, luminosity, trial, channel)[start:stop], label="LFP signal")
         plt.legend()
         if save:
             plt.savefig(
-                "/home/pasca/School/Licenta/Datasets/CER01A50/Plots/" + "{}/".format(movie) + plot_title + ".png")
+                "/home/pasca/School/Licenta/Datasets/CER01A50/Plots/{0}.png".format(
+                    str(orientation * luminosity) + plot_title))
         if show:
             plt.show()
-
-    def get_dataset_piece(self, movie, trial, channel):
-        return self.all_lfp_data[movie][trial, channel, :]
-
-    def get_total_length(self, partition):
-        if partition == "TRAIN":
-            return self.train[1].size + self.train[2].size + self.train[3].size
-        elif partition == "VAL":
-            return self.validation[1].size + self.validation[2].size + self.validation[3].size
-        elif partition == "TEST":
-            return self.test[1].size + self.test[2].size + self.test[3].size
-        else:
-            raise ValueError("Please pick a valid partition from: TRAIN, VAL and TEST")
 
 
 if __name__ == '__main__':
     dataset = MouseAChLFP()
-    print(dataset.channels)
+    print(dataset.all_lfp_data.shape)
