@@ -24,7 +24,7 @@ def plot_predictions(original_sequence, image_title, nr_predictions, frame_size,
              label="Predicted sequence")
     plt.legend()
     plt.savefig(save_path + '/' + title + ".png")
-    plt.show()
+    # plt.show()
     plt.close()
 
 
@@ -68,22 +68,24 @@ def generate_prediction_name(seq_addr):
     return name
 
 
-def get_predictions(model, model_params, nr_steps=1000):
+def get_predictions(model, model_params, epoch, starting_point, nr_prediction_steps):
     pred_seqs = model_params.dataset.prediction_sequences
     for source in pred_seqs:
         for sequence, addr in pred_seqs[source]:
             image_name = generate_prediction_name(addr)
-            get_predictions_on_sequence(model, model_params, sequence, nr_steps, image_name, 500, True)
-            get_predictions_on_sequence(model, model_params, sequence, nr_steps, image_name, 500, False)
+            image_name = "E:{}_".format(epoch) + image_name
+            get_predictions_on_sequence(model, model_params, sequence, nr_prediction_steps, image_name, starting_point, True)
+            get_predictions_on_sequence(model, model_params, sequence, nr_prediction_steps, image_name, starting_point, False)
 
 
 class PlotCallback(callbacks.Callback):
-    def __init__(self, model_params, plot_period, nr_predictions_steps):
+    def __init__(self, model_params, plot_period, nr_predictions_steps, starting_point):
         super().__init__()
         self.model_params = model_params
         self.epoch = 0
         self.nr_prediction_steps = nr_predictions_steps
         self.plot_period = plot_period
+        self.starting_point = starting_point
 
     def on_train_begin(self, logs={}):
         return
@@ -92,7 +94,9 @@ class PlotCallback(callbacks.Callback):
         self.epoch += 1
 
         if self.epoch % self.plot_period == 0 or self.epoch == 1:
-            get_predictions(self.model, self.model_params, nr_steps=self.nr_prediction_steps)
+            get_predictions(self.model, self.model_params, self.epoch, self.starting_point,
+                            nr_prediction_steps=self.nr_prediction_steps)
 
     def on_train_end(self, logs=None):
-        get_predictions(self.model, self.model_params, nr_steps=self.nr_prediction_steps)
+        get_predictions(self.model, self.model_params, "TrainEnd", self.starting_point,
+                        nr_prediction_steps=self.nr_prediction_steps)

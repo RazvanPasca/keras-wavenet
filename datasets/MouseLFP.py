@@ -80,7 +80,7 @@ class MouseLFP(LFPDataset):
             self.test = self.all_lfp_data[:, :, :, :,
                         self.train_length + self.val_length:self.train_length + self.val_length + self.test_length]
 
-    def frame_generator(self, frame_size, batch_size, classifying, length, data):
+    def frame_generator(self, frame_size, batch_size, classifying,  data):
         x = []
         y = []
         while 1:

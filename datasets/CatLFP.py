@@ -1,4 +1,3 @@
-# from timeit import default_timer as timer
 from datasets.LFPDataset import LFPDataset
 from datasets.DATASET_PATHS import CAT_DATASET_PATH
 import matplotlib.pyplot as plt
@@ -6,7 +5,7 @@ import numpy as np
 
 
 class CatLFP(LFPDataset):
-    def __init__(self, val_perc=0.20, test_perc=0.20, random_seed=42, nr_bins=256, nr_of_seqs=3):
+    def __init__(self, val_perc=0.20, test_perc=0.20, random_seed=42, nr_bins=256, nr_of_seqs=1):
         super().__init__(CAT_DATASET_PATH)
         self.nr_bins = nr_bins
 
@@ -40,13 +39,6 @@ class CatLFP(LFPDataset):
         max_train_seq = np.ceil(self.values_range[1])
         self.bins = np.linspace(min_train_seq, max_train_seq, self.nr_bins)
         self.bin_size = self.bins[1] - self.bins[0]
-        # print("Pre computing classes for the dataset")
-        # start = timer()
-        # for channel in self.channels:
-        #     for v in channel:
-        #         self.cached_val_bin[v] = self._encode_input_to_bin(v)
-        # end = timer()
-        # print("Time needed for pre computing classes", end - start)
 
     def _encode_input_to_bin(self, target_val):
         if target_val not in self.cached_val_bin:

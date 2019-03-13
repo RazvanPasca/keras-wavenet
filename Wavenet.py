@@ -36,7 +36,8 @@ def train_model(model_params):
     tensor_board_callback = TensorBoard(log_dir=model_params.get_save_path(),
                                         write_graph=True)
     log_callback = CSVLogger(model_params.get_save_path() + "/session_log.csv")
-    plot_figure_callback = PlotCallback(model_params, 1, nr_predictions_steps=2000)
+    plot_figure_callback = PlotCallback(model_params, 1, nr_predictions_steps=100,
+                                        starting_point=1200 - model_params.frame_size)
 
     model.fit_generator(
         model_params.dataset.train_frame_generator(model_params.frame_size,
@@ -59,7 +60,9 @@ def test_model(model_params):
     save_path = model_params.get_save_path()
     model = load_model(save_path + '.h5')
     model.summary()
-    get_predictions(model, model_params, "After_training")
+    get_predictions(model, model_params, "TrainEnd", starting_point=1200 - model_params.frame_size,
+                    nr_prediction_steps=100)
+    print("Finished testing model")
 
 
 def log_training_session(model_params):
